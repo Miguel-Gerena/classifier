@@ -1,0 +1,7 @@
+transformers==4.36.0
+bitsandbytes
+accelerate
+
+--find-links https://download.pytorch.org/whl/cu121
+
+torch==2.2.0+cu121
