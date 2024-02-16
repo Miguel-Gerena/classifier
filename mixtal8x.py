@@ -1,6 +1,9 @@
 import transformers
 from transformers import AutoTokenizer
 import torch
+import os
+
+os.environ['TRANSFORMERS_CACHE'] = '/blabla/cache/'
 
 model = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 

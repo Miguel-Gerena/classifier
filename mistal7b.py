@@ -1,4 +1,12 @@
+import os
+# PATH =  "D:/classes/cache/huggingface/hub"
+# os.environ['TRANSFORMERS_CACHE'] = PATH
+# os.environ['HF_HOME'] = PATH
+# os.environ['HF_DATASETS_CACHE'] = PATH
+# os.environ['TORCH_HOME'] = PATH
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import time
+
 
 device = "cuda" # the device to load the model onto
 
@@ -15,7 +23,8 @@ encodeds = tokenizer.apply_chat_template(messages, return_tensors="pt")
 
 model_inputs = encodeds.to(device)
 model.to(device)
-
+start = time.time()
 generated_ids = model.generate(model_inputs, max_new_tokens=1000, do_sample=True)
+print("tokens per second: ", (generated_ids.shape[1] - encodeds.shape[1] )/ (time.time()-start))
 decoded = tokenizer.batch_decode(generated_ids)
 print(decoded[0]) 
