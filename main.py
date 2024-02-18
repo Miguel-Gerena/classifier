@@ -1,4 +1,11 @@
 # Standard libraries and dependencies
+import os
+if os.getlogin() == "darke":
+    PATH =  "D:/classes/cache/huggingface/hub"
+    os.environ['TRANSFORMERS_CACHE'] = PATH
+    os.environ['HF_HOME'] = PATH
+    os.environ['HF_DATASETS_CACHE'] = PATH
+    
 import argparse
 import random
 import numpy as np
@@ -69,7 +76,8 @@ def text2bow(input, vocab_size):
     return np.array(arr)
 
 # Create model and tokenizer
-def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased', dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
+def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased',
+                             dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
     special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
 
     if args.validation:
@@ -440,16 +448,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
-    parser.add_argument('--data_dir', default='/mnt/data/HUPD/distilled', type=str, help='Patent data directory.')
-    parser.add_argument('--dataset_load_path', default='/mnt/data/HUPD/patents-project-dataset/datasets/patents/patents.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
+    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
+    # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_load_path', default='HUPD/hupd', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
     parser.add_argument('--section', type=str, default='abstract', help='Patent application section of interest.')
-    parser.add_argument('--train_filing_start_date', type=str, default=None, help='Start date for filtering the training data.')
-    parser.add_argument('--train_filing_end_date', type=str, default=None, help='End date for filtering the training data.')
-    parser.add_argument('--val_filing_start_date', type=str, default=None, help='Start date for filtering the training data.')
-    parser.add_argument('--val_filing_end_date', type=str, default=None, help='End date for filtering the validation data.')
+    parser.add_argument('--train_filing_start_date', type=str, default='2016-01-01', help='Start date for filtering the training data.')
+    parser.add_argument('--train_filing_end_date', type=str, default='2016-01-21', help='End date for filtering the training data.')
+    parser.add_argument('--val_filing_start_date', type=str, default="2016-01-22", help='Start date for filtering the training data.')
+    parser.add_argument('--val_filing_end_date', type=str, default="2016-01-31", help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
@@ -506,8 +515,10 @@ if __name__ == '__main__':
     filename = args.filename
     if filename is None:
         if args.model_name == 'naive_bayes':
+            os.makedirs(f"results/{args.model_name}{args.naive_bayes_version}", exist_ok=True)
             filename = f'./results/{args.model_name}/{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
         else:
+            os.makedirs(f"results/{args.model_name}", exist_ok=True)
             filename = f'./results/{args.model_name}/{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
     write_file = open(filename, "w")
 
@@ -519,8 +530,9 @@ if __name__ == '__main__':
 
     # Load the dataset dictionary
     dataset_dict = load_dataset(args.dataset_load_path , 
-        cache_dir=args.cache_dir,
-        data_dir=args.data_dir,
+        name=args.dataset_name,
+        # cache_dir=args.cache_dir,
+        # data_dir=args.data_dir,
         ipc_label=args.ipc_label,
         cpc_label= args.cpc_label,
         train_filing_start_date=args.train_filing_start_date, 
