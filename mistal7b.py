@@ -1,9 +1,9 @@
 import os
-# PATH =  "D:/classes/cache/huggingface/hub"
-# os.environ['TRANSFORMERS_CACHE'] = PATH
-# os.environ['HF_HOME'] = PATH
-# os.environ['HF_DATASETS_CACHE'] = PATH
-# os.environ['TORCH_HOME'] = PATH
+PATH =  "D:/classes/cache/huggingface/hub"
+os.environ['TRANSFORMERS_CACHE'] = PATH
+os.environ['HF_HOME'] = PATH
+os.environ['HF_DATASETS_CACHE'] = PATH
+os.environ['TORCH_HOME'] = PATH
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
 

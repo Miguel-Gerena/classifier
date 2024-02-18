@@ -1,6 +1,7 @@
 transformers==4.36.0
-bitsandbytes
+https://github.com/jllllll/bitsandbytes-windows-webui/releases/download/wheels/bitsandbytes-0.41.1-py3-none-win_amd64.whl
 accelerate
+scikit-learn
 
 --find-links https://download.pytorch.org/whl/cu121
 
