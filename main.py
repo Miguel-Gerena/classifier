@@ -509,7 +509,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=1000, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=500000, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
