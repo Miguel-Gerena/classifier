@@ -12,6 +12,7 @@ import numpy as np
 import collections
 from tqdm import tqdm
 import datetime
+import json
 
 
 # wandb
@@ -54,7 +55,7 @@ from tokenizers.trainers import WordLevelTrainer
 from transformers import get_linear_schedule_with_warmup
 
 # Confusion matrix
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
 
 # Fixing the random seeds
 RANDOM_SEED = 1729
@@ -254,7 +255,8 @@ def measure_accuracy(outputs, labels):
     labels = labels.flatten()
     correct = np.sum(preds == labels)
     c_matrix = confusion_matrix(labels, preds, labels=CLASS_NAMES)
-    return correct, len(labels), c_matrix
+    f1 = f1_score(labels, preds, labels=CLASS_NAMES)
+    return correct, len(labels), c_matrix, f1
 
 # Convert ids2string
 def convert_ids_to_string(tokenizer, input):
@@ -266,6 +268,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     total_loss = 0.
     total_correct = 0
     total_sample = 0
+    total_f1 = 0
     total_confusion = np.zeros((CLASSES, CLASSES))
     
     # Loop over the examples in the evaluation set
@@ -281,30 +284,36 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         loss = criterion(outputs, decisions) 
         logits = outputs 
         total_loss += loss.cpu().item()
-        correct_n, sample_n, c_matrix = measure_accuracy(logits.cpu().numpy(), decisions.cpu().numpy())
+        correct_n, sample_n, c_matrix, f1 = measure_accuracy(logits.cpu().numpy(), decisions.cpu().numpy())
         total_confusion += c_matrix
         total_correct += correct_n
         total_sample += sample_n
+        total_f1 = total_f1 + (f1-total_f1)/total_sample
     
     # Print the performance of the model on the validation set 
     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
+    print(f'*** F1 on the {name} set: {total_f1}')
     print(f'*** Confusion matrix:\n{total_confusion}')
     if write_file:
-        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+            write_file.write(f'*** F1 on the  {name} set:{total_f1}\n')
+            write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
 
-    return total_loss, float(total_correct/total_sample) * 100.
+    return total_loss, float(total_correct/total_sample) * 100., total_f1
 
 
 # Training procedure (for the neural models)
 def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None):
     print('\n>>>Training starts...')
     if write_file:
-        write_file.write(f'\n>>>Training starts...\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'\n>>>Training starts...\n')
     # Training mode is on
     model.train()
     # Best validation set accuracy so far.
     best_val_acc = 0
+    best_f1 = 0
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
@@ -337,9 +346,10 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 print(f'*** Loss: {loss}')
                 print(f'*** Input: {convert_ids_to_string(tokenizer, inputs[0])}')
                 if write_file:
-                    write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
+                    with open(args.filename, "a") as write_file:
+                        write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
                 # Get the performance of the model on the validation set
-                _, val_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
+                _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
                 model.train()
                 if args.wandb:
                     wandb.log({'Validation Accuracy': val_acc})
@@ -349,39 +359,68 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                     if args.save_path:
                         # If the model is a Transformer architecture, make sure to save the tokenizer as well
                         if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
-                            model.save_pretrained(args.save_path)
-                            tokenizer.save_pretrained(args.save_path + '_tokenizer')
+                            model.save_pretrained(args.save_path + 'model')
+                            tokenizer.save_pretrained(args.save_path + 'tokenizer')
+                        else:
+                            torch.save(model.state_dict(), args.save_path)
+                if best_f1 < f1_acc:
+                    best_f1 = f1_acc
+                    # Save the model if a save directory is specified
+                    if args.save_path:
+                        # If the model is a Transformer architecture, make sure to save the tokenizer as well
+                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                            model.save_pretrained(args.save_path + "f1_model")
+                            tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
                         else:
                             torch.save(model.state_dict(), args.save_path)
     
     # Training is complete!
     print(f'\n ~ The End ~')
     if write_file:
-        write_file.write('\n ~ The End ~\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write('\n ~ The End ~\n')
     
     # Final evaluation on the validation set
-    _, val_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file)
+    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file)
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
         # Save the best model so fare
         if args.save_path:
             if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
-                model.save_pretrained(args.save_path)
+                model.save_pretrained(args.save_path + 'model')
             else:
                 torch.save(model.state_dict(), args.save_path)
+
+    if best_f1 < f1_acc:
+        best_f1 = f1_acc
+        # Save the model if a save directory is specified
+        if args.save_path:
+            # If the model is a Transformer architecture, make sure to save the tokenizer as well
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                model.save_pretrained(args.save_path + "f1_model")
+                tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
+            else:
+                torch.save(model.state_dict(), args.save_path)
+    
     
     # Additionally, print the performance of the model on the training set if we were not doing only inference
     if not args.validation:
         _, train_val_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
         print(f'*** Accuracy on the training set: {train_val_acc}.')
         if write_file:
-            write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
+            with open(args.filename, "a") as write_file:
+                write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
     
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
+    print(f'*** Highest f1 accuract on the validation set: {best_f1}.')
+
     if write_file:
-        write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
+            write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
+
 
 
 # Evaluation procedure (for the Naive Bayes models)
@@ -405,8 +444,9 @@ def validation_naive_bayes(data_loader, model, vocab_size, name='validation', wr
     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
     print(f'*** Confusion matrix:\n{total_confusion}')
     if write_file:
-        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+            write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
     return total_loss, float(total_correct/total_sample) * 100.
 
 
@@ -469,7 +509,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=20, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=1000, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -488,6 +528,8 @@ if __name__ == '__main__':
     parser.add_argument('--tokenizer_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13_tokenizer", help='(Pre-trained) tokenizer path.')
     parser.add_argument('--model_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13", help='(Pre-trained) model path.')
     parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
+    # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
+
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
     parser.add_argument('--n_filters', type=int, default=25, help='Number of filters in the CNN (if applicable)')
     parser.add_argument('--filter_sizes', type=int, nargs='+', action='append', default=[[3,4,5], [5,6,7], [7,9,11]], help='Filter sizes for the CNN (if applicable).')
@@ -519,6 +561,7 @@ if __name__ == '__main__':
         else:
             os.makedirs(f"results/{args.model_name}", exist_ok=True)
             filename = f'./results/{args.model_name}/{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
+    args.filename = filename
     write_file = open(filename, "w")
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
@@ -629,8 +672,13 @@ if __name__ == '__main__':
             now = datetime.datetime.now()
             args.save_path = f"{args.save_path}/{args.model_name}/date_{now.month}_{now.day}_hr_{now.hour}/"
             os.makedirs(f"{args.save_path}", exist_ok=True)
+            with open(f"{args.save_path}arguments.json", "w") as file:
+                json.dump(args.__dict__, file)
 
         # Train and validate
+        if write_file:
+            write_file.close()
+
         if not args.validation:
             train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file)
         else:
@@ -639,6 +687,5 @@ if __name__ == '__main__':
         # Save the model
         if args.save_path:
             tokenizer.save_pretrained(args.save_path + '_tokenizer')
-
     if write_file:
         write_file.close()
