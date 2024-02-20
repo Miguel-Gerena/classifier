@@ -11,6 +11,8 @@ import random
 import numpy as np
 import collections
 from tqdm import tqdm
+import datetime
+
 
 # wandb
 try:
@@ -62,7 +64,7 @@ random.seed(RANDOM_SEED)
 
 # Number of classes (ACCEPTED and REJECTED)
 CLASSES = 2
-CLASS_NAMES = [i for i in range(CLASSES)]
+CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
 # Create a BoW (Bag-of-Words) representation
 def text2bow(input, vocab_size):
@@ -263,7 +265,6 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     model.eval()
     total_loss = 0.
     total_correct = 0
-    total_correct_class_level = 0
     total_sample = 0
     total_confusion = np.zeros((CLASSES, CLASSES))
     
@@ -287,11 +288,9 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     
     # Print the performance of the model on the validation set 
     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-    print(f'*** Class-level accuracy on the {name} set: {total_correct_class_level/total_sample}')
     print(f'*** Confusion matrix:\n{total_confusion}')
     if write_file:
         write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** Class-level accuracy on the {name} set: {total_correct_class_level/total_sample}\n')
         write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
 
     return total_loss, float(total_correct/total_sample) * 100.
@@ -470,7 +469,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=3, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=20, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -484,11 +483,11 @@ if __name__ == '__main__':
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
     # Model related params
-    parser.add_argument('--model_name', type=str, default='bert-base-uncased', help='Name of the model.')
+    parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
-    parser.add_argument('--tokenizer_path', type=str, default=None, help='(Pre-trained) tokenizer path.')
-    parser.add_argument('--model_path', type=str, default=None, help='(Pre-trained) model path.')
-    parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
+    parser.add_argument('--tokenizer_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13_tokenizer", help='(Pre-trained) tokenizer path.')
+    parser.add_argument('--model_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13", help='(Pre-trained) model path.')
+    parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
     parser.add_argument('--n_filters', type=int, default=25, help='Number of filters in the CNN (if applicable)')
     parser.add_argument('--filter_sizes', type=int, nargs='+', action='append', default=[[3,4,5], [5,6,7], [7,9,11]], help='Filter sizes for the CNN (if applicable).')
@@ -626,8 +625,16 @@ if __name__ == '__main__':
         if write_file:
             write_file.write(f'\nModel:\n {model}\nOptimizer: {optim}\n')
         
+        if args.save_path:
+            now = datetime.datetime.now()
+            args.save_path = f"{args.save_path}/{args.model_name}/date_{now.month}_{now.day}_hr_{now.hour}/"
+            os.makedirs(f"{args.save_path}", exist_ok=True)
+
         # Train and validate
-        train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file)
+        if not args.validation:
+            train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file)
+        else:
+            validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
 
         # Save the model
         if args.save_path:
