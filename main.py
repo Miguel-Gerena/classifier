@@ -24,6 +24,7 @@ except ImportError:
 
 # PyTorch
 import torch
+from torch.utils import tensorboard
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 # Hugging Face datasets
@@ -58,6 +59,9 @@ from transformers import get_linear_schedule_with_warmup
 # Confusion matrix
 from sklearn.metrics import confusion_matrix, f1_score
 
+#additional metrics
+from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
+
 # Fixing the random seeds
 RANDOM_SEED = 1729
 torch.manual_seed(RANDOM_SEED)
@@ -66,7 +70,7 @@ random.seed(RANDOM_SEED)
 
 # Number of classes (ACCEPTED and REJECTED)
 CLASSES = 2
-CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
+CLASS_NAMES = [i for i in range(CLASSES)]
 
 # Create a BoW (Bag-of-Words) representation
 def text2bow(input, vocab_size):
@@ -256,9 +260,7 @@ def dataset_statistics(args, dataset_loader, tokenizer):
     return label_stats
 
 # Calculate TOP1 accuracy
-def measure_accuracy(outputs, labels):
-    preds = np.argmax(outputs, axis=1).flatten()
-    labels = labels.flatten()
+def measure_accuracy(preds, labels, torch_metrics = None):
     correct = np.sum(preds == labels)
     c_matrix = confusion_matrix(labels, preds, labels=CLASS_NAMES)
     f1 = f1_score(labels, preds, labels=CLASS_NAMES)
@@ -269,15 +271,20 @@ def convert_ids_to_string(tokenizer, input):
     return ' '.join(tokenizer.convert_ids_to_tokens(input)) # tokenizer.decode(input)
 
 # Evaluation procedure (for the neural models)
-def validation(args, val_loader, model, criterion, device, name='validation', write_file=None):
+def validation(args, val_loader, model, criterion, device, name='validation', write_file=None, tensorboard_writer=None, step = 0, use_torch_metrics=True):
     model.eval()
     total_loss = 0.
     total_correct = 0
     total_sample = 0
-    total_f1 = 0
     total_confusion = np.zeros((CLASSES, CLASSES))
-    
-    # Loop over the examples in the evaluation set
+
+    if use_torch_metrics:
+        torch_metrics = {}
+        torch_metrics["acc"] = BinaryAccuracy()
+        torch_metrics["f1"] = BinaryF1Score()
+        torch_metrics["auc"] = BinaryAUPRC()
+
+        # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
         inputs, decisions = batch['input_ids'], batch['output']
         inputs = inputs.to(device)
@@ -290,27 +297,46 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         loss = criterion(outputs, decisions) 
         logits = outputs 
         total_loss += loss.cpu().item()
-        correct_n, sample_n, c_matrix, f1 = measure_accuracy(logits.cpu().numpy(), decisions.cpu().numpy())
+
+        preds = torch.argmax(logits, axis=1).flatten()
+        labels = decisions.flatten()
+
+        correct_n, sample_n, c_matrix, f1 = measure_accuracy(preds.cpu().numpy(), labels.cpu().numpy())
         total_confusion += c_matrix
         total_correct += correct_n
         total_sample += sample_n
-        total_f1 = total_f1 + (f1-total_f1)/total_sample
-    
+
+        torch_metrics["acc"] = torch_metrics["acc"].update(preds, labels)
+        torch_metrics["f1"] = torch_metrics["acc"].update(preds, labels)
+        torch_metrics["auc"] = torch_metrics["acc"].update(preds, labels)
+
+    mean_loss = total_loss/total_sample
+    acc = total_correct/total_sample
+    total_f1 = torch_metrics["f1"].compute()
+
     # Print the performance of the model on the validation set 
-    print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-    print(f'*** F1 on the {name} set: {total_f1}')
+    print(f'*** Accuracy on the {name} set: {acc}')
     print(f'*** Confusion matrix:\n{total_confusion}')
+
+    if args.tensorboard:
+        tensorboard_writer.add_scalar('mean_loss/val', mean_loss, step)
+        tensorboard_writer.add_scalar('acc/val', acc, step)   
+
+        tensorboard_writer.add_scalar('acc/torch_val', torch_metrics["acc"].compute(), step)   
+        tensorboard_writer.add_scalar('f1/torch_val', total_f1, step)   
+        tensorboard_writer.add_scalar('auc/torch_val', torch_metrics["auc"].compute(), step)   
+
+
     if write_file:
         with open(args.filename, "a") as write_file:
             write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-            write_file.write(f'*** F1 on the  {name} set:{total_f1}\n')
             write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
 
-    return total_loss, float(total_correct/total_sample) * 100., total_f1
+    return mean_loss, float(acc) * 100., total_f1
 
 
 # Training procedure (for the neural models)
-def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None):
+def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None, tensorboard_writer=None):
     print('\n>>>Training starts...')
     if write_file:
         with open(args.filename, "a") as write_file:
@@ -346,19 +372,26 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             # wandb (optional)
             if args.wandb:
                 wandb.log({'Training Loss': loss})
+            
+            if args.tensorboard:
+                tensorboard_writer.add_scalar('loss/train', loss.item(), epoch * len(data_loaders[0]) + i)
+                tensorboard_writer.add_scalar('mean_loss/train', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
+
 
             # Print the loss every val_every step
-            if i % args.val_every == 0:
+            if (epoch * len(data_loaders[0]) + i) % args.val_every == 0 and i !=0:
                 print(f'*** Loss: {loss}')
                 print(f'*** Input: {convert_ids_to_string(tokenizer, inputs[0])}')
                 if write_file:
                     with open(args.filename, "a") as write_file:
                         write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
                 # Get the performance of the model on the validation set
-                _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
+                mean_loss, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
                 model.train()
+
                 if args.wandb:
                     wandb.log({'Validation Accuracy': val_acc})
+
                 if best_val_acc < val_acc:
                     best_val_acc = val_acc
                     # Save the model if a save directory is specified
@@ -387,7 +420,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             write_file.write('\n ~ The End ~\n')
     
     # Final evaluation on the validation set
-    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file)
+    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer)
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
@@ -497,7 +530,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
     # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
     # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
-    parser.add_argument('--dataset_load_path', default='hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
+    parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
     parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
@@ -516,7 +549,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=10, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=100, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -524,6 +557,11 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb project name.')
     parser.add_argument('--pos_class_weight', type=float, default=0, help='The class weight of the rejected class label (it is 0 by default).')
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
+    parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
+    parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
+
+    
+
     
     # Saving purposes
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
@@ -571,6 +609,12 @@ if __name__ == '__main__':
             filename = f'./results/{args.model_name}/{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
     args.filename = filename
     write_file = open(filename, "w")
+    
+    tensorboard_writer = ""
+    if args.tensorboard:
+        # os.makedirs(f"tensorboard", exist_ok=True)
+        t_path = f"./tensorboard/{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}" 
+        tensorboard_writer = tensorboard.SummaryWriter(log_dir=t_path)
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
     
@@ -616,6 +660,8 @@ if __name__ == '__main__':
     print(f'*** Vocabulary: {args.vocab_size}')
 
     if write_file:
+        now = datetime.datetime.now()
+        write_file.write(f'*** date time: {now.month}_{now.day}_hr_{now.hour}\n')
         write_file.write(f'*** CPC Label: {cat_label}\n')
         write_file.write(f'*** Section: {args.section}\n')
         write_file.write(f'*** Vocabulary: {args.vocab_size}\n')
@@ -664,8 +710,15 @@ if __name__ == '__main__':
             class_weights = torch.tensor([args.pos_class_weight, 1. - args.pos_class_weight]).to(device)
         else:
             class_weights = None
+
         # Loss function 
-        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+        # torch.nn.BCEWithLogitsLoss  #investigate binary loss
+        # if len(CLASS_NAMES)> 2:
+        if args.handle_skew_data:
+            total_examples = sum(train_label_stats.values())
+            class_weights = torch.tensor([(total_examples - train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data
+        print(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
         # wandb
         # assert wandb is not None
@@ -688,12 +741,13 @@ if __name__ == '__main__':
             write_file.close()
 
         if not args.validation:
-            train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file)
+            train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file, tensorboard_writer)
         else:
-            validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
+            validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer)
 
         # Save the model
         if args.save_path:
-            tokenizer.save_pretrained(args.save_path + '_tokenizer')
+            model.save_pretrained(args.save_path + "final_model")
+            tokenizer.save_pretrained(args.save_path + 'final_tokenizer')
     if write_file:
         write_file.close()

@@ -23,7 +23,7 @@ from datasets import load_dataset
 # The following line will download a small version of the dataset for
 # you. If you want to download the entire dataset, use name="all"
 # instead of name="sample".
-dataset_dict = load_dataset('hupd.py',
+dataset_dict = load_dataset('./hupd.py',
     name='sample',
     data_files="https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather", 
     icpr_label=None,

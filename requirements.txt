@@ -3,6 +3,7 @@ https://github.com/jllllll/bitsandbytes-windows-webui/releases/download/wheels/b
 accelerate
 scikit-learn
 torcheval
+tensorboard
 
 --find-links https://download.pytorch.org/whl/cu121
 
