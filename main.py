@@ -1,5 +1,6 @@
 # Standard libraries and dependencies
 import os
+from unittest.mock import DEFAULT
 if os.getlogin() == "darke":
     PATH =  "D:/classes/cache/huggingface/hub"
     os.environ['TRANSFORMERS_CACHE'] = PATH
@@ -85,8 +86,13 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
 
     if args.validation:
         if model_name == 'distilbert-base-uncased':
-            tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
-            model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
+            if args.model_path:
+                tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
+                model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
+            else:
+                config = DistilBertConfig(num_labels=CLASSES, output_hidden_states=False) 
+                tokenizer = DistilBertTokenizer.from_pretrained(model_name, do_lower_case=True)
+                model = DistilBertForSequenceClassification(config=config)
             # This step is actually important.
             tokenizer.max_length = max_length
             tokenizer.model_max_length = max_length
@@ -324,7 +330,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             
             # Forward pass
             if args.model_name in ['lstm', 'cnn', 'big_cnn', 'logistic_regression']:
-                outputs = model (input_ids=inputs)
+                outputs = model(input_ids=inputs)
             else:
                 outputs = model(input_ids=inputs, labels=decisions).logits
             loss = criterion(outputs, decisions) #outputs.logits
@@ -423,35 +429,35 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
 
 
 
-# Evaluation procedure (for the Naive Bayes models)
-def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
-    total_loss = 0.
-    total_correct = 0
-    total_sample = 0
-    total_confusion = np.zeros((CLASSES, CLASSES))
+# # Evaluation procedure (for the Naive Bayes models)
+# def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
+#     total_loss = 0.
+#     total_correct = 0
+#     total_sample = 0
+#     total_confusion = np.zeros((CLASSES, CLASSES))
     
-    # Loop over all the examples in the evaluation set
-    for i, batch in enumerate(tqdm(data_loader)):
-        input, label = batch['input_ids'], batch['output']
-        input = text2bow(input, vocab_size)
-        input[:, pad_id] = 0
-        logit = model.predict_log_proba(input)
-        label = np.array(label.flatten()) 
-        correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
-        total_confusion += c_matrix
-        total_correct += correct_n
-        total_sample += sample_n
-    print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-    print(f'*** Confusion matrix:\n{total_confusion}')
-    if write_file:
-        with open(args.filename, "a") as write_file:
-            write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-            write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
-    return total_loss, float(total_correct/total_sample) * 100.
+#     # Loop over all the examples in the evaluation set
+#     for i, batch in enumerate(tqdm(data_loader)):
+#         input, label = batch['input_ids'], batch['output']
+#         input = text2bow(input, vocab_size)
+#         input[:, pad_id] = 0
+#         logit = model.predict_log_proba(input)
+#         label = np.array(label.flatten()) 
+#         correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
+#         total_confusion += c_matrix
+#         total_correct += correct_n
+#         total_sample += sample_n
+#     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
+#     print(f'*** Confusion matrix:\n{total_confusion}')
+#     if write_file:
+#         with open(args.filename, "a") as write_file:
+#             write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+#             write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+#     return total_loss, float(total_correct/total_sample) * 100.
 
 
-# Training procedure (for the Naive Bayes models)
-def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
+# # Training procedure (for the Naive Bayes models)
+# def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
     pad_id = tokenizer.encode('[PAD]') # NEW
     print(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...')
     write_file.write(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...\n')
@@ -490,10 +496,10 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
     # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
     # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
-    parser.add_argument('--dataset_load_path', default='HUPD/hupd', type=str, help='Patent data main data load path (viz., ../patents.py).')
+    parser.add_argument('--dataset_load_path', default='hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
-    parser.add_argument('--section', type=str, default='abstract', help='Patent application section of interest.')
+    parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
     parser.add_argument('--train_filing_start_date', type=str, default='2016-01-01', help='Start date for filtering the training data.')
     parser.add_argument('--train_filing_end_date', type=str, default='2016-01-21', help='End date for filtering the training data.')
     parser.add_argument('--val_filing_start_date', type=str, default="2016-01-22", help='Start date for filtering the training data.')
@@ -509,7 +515,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=500000, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=10, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -523,10 +529,11 @@ if __name__ == '__main__':
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
     # Model related params
+    model_path = ""
     parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
-    parser.add_argument('--tokenizer_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13_tokenizer", help='(Pre-trained) tokenizer path.')
-    parser.add_argument('--model_path', type=str, default="classifier_weights/DistilBERT (Base-Uncased), G06F (Abstract) [Training_ 2011-2013]/dbert_G06F_train2011to13", help='(Pre-trained) model path.')
+    parser.add_argument('--model_path', type=str, default=model_path, help='(Pre-trained) model path.')
+    parser.add_argument('--tokenizer_path', type=str, default=model_path + "_tokenizer", help='(Pre-trained) tokenizer path.')
     parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
@@ -602,7 +609,7 @@ if __name__ == '__main__':
         n_classes = CLASSES,
         max_length=args.max_length
         )
-    
+
     print(f'*** CPC Label: {cat_label}') 
     print(f'*** Section: {args.section}')
     print(f'*** Vocabulary: {args.vocab_size}')
