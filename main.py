@@ -412,11 +412,12 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     
     # Additionally, print the performance of the model on the training set if we were not doing only inference
     if not args.validation:
-        _, train_val_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
+        _, train_val_acc, f1_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
         print(f'*** Accuracy on the training set: {train_val_acc}.')
         if write_file:
             with open(args.filename, "a") as write_file:
                 write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
+                write_file.write(f'\n*** f1 on the training set: {f1_acc}.')
     
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
