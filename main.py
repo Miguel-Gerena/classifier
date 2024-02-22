@@ -538,7 +538,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='excluding_2011_2018', type=str, help='Patent data directory.')
     # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
     # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
