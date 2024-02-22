@@ -416,16 +416,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                             tokenizer.save_pretrained(args.save_path + 'tokenizer')
                         else:
                             torch.save(model.state_dict(), args.save_path)
-                if best_f1 < f1_acc:
-                    best_f1 = f1_acc
-                    # Save the model if a save directory is specified
-                    if args.save_path:
-                        # If the model is a Transformer architecture, make sure to save the tokenizer as well
-                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
-                            model.save_pretrained(args.save_path + "f1_model")
-                            tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
-                        else:
-                            torch.save(model.state_dict(), args.save_path)
+
 
         if epoch != 0 and epoch % args.validate_training_every_epoch == 0:
             validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
@@ -538,7 +529,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
     # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
     # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')

@@ -249,6 +249,21 @@ class Patents(datasets.GeneratorBasedBuilder):
                     tar_file.extractall(f'{json_dir}')
                     tar_file.close()    
 
+        if self.config.name == 'all':
+            final_df = pd.DataFrame()
+            for file in os.listdir(json_dir):
+                year = file.split(".")
+                if len(year) == 1:
+                    print(year)
+                    start  = f"{year[0]}-01-01"
+                    end = f"{year[0]}-12-31"
+                    start_df = df[df['filing_date'] >= start]
+                    final_df = pd.concat([final_df, start_df[start_df['filing_date'] <= end]])
+            df = final_df
+            del final_df
+            del start_df       
+
+
         # Train-validation split (either uniform or by date)
         if self.config.uniform_split:
 
