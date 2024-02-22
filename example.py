@@ -2,6 +2,12 @@
 Here is an example of how one might load this dataset, explore it, 
 transform it, and finally load it in PyTorch.
 """
+import os
+if os.getlogin() == "darke":
+    PATH =  "D:/classes/cache/huggingface/hub"
+    os.environ['TRANSFORMERS_CACHE'] = PATH
+    os.environ['HF_HOME'] = PATH
+    os.environ['HF_DATASETS_CACHE'] = PATH
 
 import torch
 from pprint import pprint
@@ -17,15 +23,16 @@ from datasets import load_dataset
 # The following line will download a small version of the dataset for
 # you. If you want to download the entire dataset, use name="all"
 # instead of name="sample".
-dataset_dict = load_dataset(
-    'greeneggsandyaml/test-dataset-debug', 
-    name="sample",
-    ipcr_label=None,
+dataset_dict = load_dataset('./hupd.py',
+    name='sample',
+    data_files="https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather", 
+    icpr_label=None,
     train_filing_start_date='2016-01-01',
-    train_filing_end_date='2016-01-20',
-    val_filing_start_date='2016-01-20',
+    train_filing_end_date='2016-01-21',
+    val_filing_start_date='2016-01-22',
     val_filing_end_date='2016-01-31',
-)
+)   
+
 
 # Here we can see the `train` and `val` splits, along with the
 # location of the cached data files

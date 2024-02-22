@@ -1,9 +1,20 @@
 # Standard libraries and dependencies
+import os
+from unittest.mock import DEFAULT
+if os.getlogin() == "darke":
+    PATH =  "D:/classes/cache/huggingface/hub"
+    os.environ['TRANSFORMERS_CACHE'] = PATH
+    os.environ['HF_HOME'] = PATH
+    os.environ['HF_DATASETS_CACHE'] = PATH
+    
 import argparse
 import random
 import numpy as np
 import collections
 from tqdm import tqdm
+import datetime
+import json
+
 
 # wandb
 try:
@@ -13,6 +24,7 @@ except ImportError:
 
 # PyTorch
 import torch
+from torch.utils import tensorboard
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 # Hugging Face datasets
@@ -45,7 +57,10 @@ from tokenizers.trainers import WordLevelTrainer
 from transformers import get_linear_schedule_with_warmup
 
 # Confusion matrix
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
+
+#additional metrics
+from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
 
 # Fixing the random seeds
 RANDOM_SEED = 1729
@@ -69,13 +84,19 @@ def text2bow(input, vocab_size):
     return np.array(arr)
 
 # Create model and tokenizer
-def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased', dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
+def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased',
+                             dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
     special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
 
     if args.validation:
         if model_name == 'distilbert-base-uncased':
-            tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
-            model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
+            if args.model_path:
+                tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
+                model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
+            else:
+                config = DistilBertConfig(num_labels=CLASSES, output_hidden_states=False) 
+                tokenizer = DistilBertTokenizer.from_pretrained(model_name, do_lower_case=True)
+                model = DistilBertForSequenceClassification(config=config)
             # This step is actually important.
             tokenizer.max_length = max_length
             tokenizer.model_max_length = max_length
@@ -239,27 +260,31 @@ def dataset_statistics(args, dataset_loader, tokenizer):
     return label_stats
 
 # Calculate TOP1 accuracy
-def measure_accuracy(outputs, labels):
-    preds = np.argmax(outputs, axis=1).flatten()
-    labels = labels.flatten()
+def measure_accuracy(preds, labels, torch_metrics = None):
     correct = np.sum(preds == labels)
     c_matrix = confusion_matrix(labels, preds, labels=CLASS_NAMES)
-    return correct, len(labels), c_matrix
+    f1 = f1_score(labels, preds, labels=CLASS_NAMES)
+    return correct, len(labels), c_matrix, f1
 
 # Convert ids2string
 def convert_ids_to_string(tokenizer, input):
     return ' '.join(tokenizer.convert_ids_to_tokens(input)) # tokenizer.decode(input)
 
 # Evaluation procedure (for the neural models)
-def validation(args, val_loader, model, criterion, device, name='validation', write_file=None):
+def validation(args, val_loader, model, criterion, device, name='validation', write_file=None, tensorboard_writer=None, step = 0, use_torch_metrics=True):
     model.eval()
     total_loss = 0.
     total_correct = 0
-    total_correct_class_level = 0
     total_sample = 0
     total_confusion = np.zeros((CLASSES, CLASSES))
-    
-    # Loop over the examples in the evaluation set
+
+    if use_torch_metrics:
+        torch_metrics = {}
+        torch_metrics["acc"] = BinaryAccuracy()
+        torch_metrics["f1"] = BinaryF1Score()
+        torch_metrics["auc"] = BinaryAUPRC()
+
+        # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
         inputs, decisions = batch['input_ids'], batch['output']
         inputs = inputs.to(device)
@@ -272,32 +297,55 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         loss = criterion(outputs, decisions) 
         logits = outputs 
         total_loss += loss.cpu().item()
-        correct_n, sample_n, c_matrix = measure_accuracy(logits.cpu().numpy(), decisions.cpu().numpy())
+
+        preds = torch.argmax(logits, axis=1).flatten()
+        labels = decisions.flatten()
+
+        correct_n, sample_n, c_matrix, f1 = measure_accuracy(preds.cpu().numpy(), labels.cpu().numpy())
         total_confusion += c_matrix
         total_correct += correct_n
         total_sample += sample_n
-    
-    # Print the performance of the model on the validation set 
-    print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-    print(f'*** Class-level accuracy on the {name} set: {total_correct_class_level/total_sample}')
-    print(f'*** Confusion matrix:\n{total_confusion}')
-    if write_file:
-        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** Class-level accuracy on the {name} set: {total_correct_class_level/total_sample}\n')
-        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
 
-    return total_loss, float(total_correct/total_sample) * 100.
+        torch_metrics["acc"] = torch_metrics["acc"].update(preds, labels)
+        torch_metrics["f1"] = torch_metrics["acc"].update(preds, labels)
+        torch_metrics["auc"] = torch_metrics["acc"].update(preds, labels)
+
+    mean_loss = total_loss/total_sample
+    acc = total_correct/total_sample
+    total_f1 = torch_metrics["f1"].compute()
+
+    # Print the performance of the model on the validation set 
+    print(f'*** Accuracy on the {name} set: {acc}')
+    print(f'*** Confusion matrix:\n{total_confusion}')
+
+    if args.tensorboard:
+        tensorboard_writer.add_scalar('mean_loss/val', mean_loss, step)
+        tensorboard_writer.add_scalar('acc/val', acc, step)   
+
+        tensorboard_writer.add_scalar('acc/torch_val', torch_metrics["acc"].compute(), step)   
+        tensorboard_writer.add_scalar('f1/torch_val', total_f1, step)   
+        tensorboard_writer.add_scalar('auc/torch_val', torch_metrics["auc"].compute(), step)   
+
+
+    if write_file:
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+            write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+
+    return mean_loss, float(acc) * 100., total_f1
 
 
 # Training procedure (for the neural models)
-def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None):
+def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None, tensorboard_writer=None):
     print('\n>>>Training starts...')
     if write_file:
-        write_file.write(f'\n>>>Training starts...\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'\n>>>Training starts...\n')
     # Training mode is on
     model.train()
     # Best validation set accuracy so far.
     best_val_acc = 0
+    best_f1 = 0
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
@@ -308,7 +356,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             
             # Forward pass
             if args.model_name in ['lstm', 'cnn', 'big_cnn', 'logistic_regression']:
-                outputs = model (input_ids=inputs)
+                outputs = model(input_ids=inputs)
             else:
                 outputs = model(input_ids=inputs, labels=decisions).logits
             loss = criterion(outputs, decisions) #outputs.logits
@@ -324,87 +372,126 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             # wandb (optional)
             if args.wandb:
                 wandb.log({'Training Loss': loss})
+            
+            if args.tensorboard:
+                tensorboard_writer.add_scalar('loss/train', loss.item(), epoch * len(data_loaders[0]) + i)
+                tensorboard_writer.add_scalar('mean_loss/train', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
+
 
             # Print the loss every val_every step
-            if i % args.val_every == 0:
+            if (epoch * len(data_loaders[0]) + i) % args.val_every == 0 and i !=0:
                 print(f'*** Loss: {loss}')
                 print(f'*** Input: {convert_ids_to_string(tokenizer, inputs[0])}')
                 if write_file:
-                    write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
+                    with open(args.filename, "a") as write_file:
+                        write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
                 # Get the performance of the model on the validation set
-                _, val_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file)
+                mean_loss, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
                 model.train()
+
                 if args.wandb:
                     wandb.log({'Validation Accuracy': val_acc})
+
                 if best_val_acc < val_acc:
                     best_val_acc = val_acc
                     # Save the model if a save directory is specified
                     if args.save_path:
                         # If the model is a Transformer architecture, make sure to save the tokenizer as well
                         if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
-                            model.save_pretrained(args.save_path)
-                            tokenizer.save_pretrained(args.save_path + '_tokenizer')
+                            model.save_pretrained(args.save_path + 'model')
+                            tokenizer.save_pretrained(args.save_path + 'tokenizer')
+                        else:
+                            torch.save(model.state_dict(), args.save_path)
+                if best_f1 < f1_acc:
+                    best_f1 = f1_acc
+                    # Save the model if a save directory is specified
+                    if args.save_path:
+                        # If the model is a Transformer architecture, make sure to save the tokenizer as well
+                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                            model.save_pretrained(args.save_path + "f1_model")
+                            tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
                         else:
                             torch.save(model.state_dict(), args.save_path)
     
     # Training is complete!
     print(f'\n ~ The End ~')
     if write_file:
-        write_file.write('\n ~ The End ~\n')
+        with open(args.filename, "a") as write_file:
+            write_file.write('\n ~ The End ~\n')
     
     # Final evaluation on the validation set
-    _, val_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file)
+    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer)
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
         # Save the best model so fare
         if args.save_path:
             if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
-                model.save_pretrained(args.save_path)
+                model.save_pretrained(args.save_path + 'model')
+            else:
+                torch.save(model.state_dict(), args.save_path)
+
+    if best_f1 < f1_acc:
+        best_f1 = f1_acc
+        # Save the model if a save directory is specified
+        if args.save_path:
+            # If the model is a Transformer architecture, make sure to save the tokenizer as well
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                model.save_pretrained(args.save_path + "f1_model")
+                tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
             else:
                 torch.save(model.state_dict(), args.save_path)
     
+    
     # Additionally, print the performance of the model on the training set if we were not doing only inference
     if not args.validation:
-        _, train_val_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
+        _, train_val_acc, f1_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
         print(f'*** Accuracy on the training set: {train_val_acc}.')
         if write_file:
-            write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
+            with open(args.filename, "a") as write_file:
+                write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
+                write_file.write(f'\n*** f1 on the training set: {f1_acc}.')
     
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
+    print(f'*** Highest f1 accuract on the validation set: {best_f1}.')
+
     if write_file:
-        write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
+        with open(args.filename, "a") as write_file:
+            write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
+            write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
 
 
-# Evaluation procedure (for the Naive Bayes models)
-def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
-    total_loss = 0.
-    total_correct = 0
-    total_sample = 0
-    total_confusion = np.zeros((CLASSES, CLASSES))
+
+# # Evaluation procedure (for the Naive Bayes models)
+# def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
+#     total_loss = 0.
+#     total_correct = 0
+#     total_sample = 0
+#     total_confusion = np.zeros((CLASSES, CLASSES))
     
-    # Loop over all the examples in the evaluation set
-    for i, batch in enumerate(tqdm(data_loader)):
-        input, label = batch['input_ids'], batch['output']
-        input = text2bow(input, vocab_size)
-        input[:, pad_id] = 0
-        logit = model.predict_log_proba(input)
-        label = np.array(label.flatten()) 
-        correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
-        total_confusion += c_matrix
-        total_correct += correct_n
-        total_sample += sample_n
-    print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-    print(f'*** Confusion matrix:\n{total_confusion}')
-    if write_file:
-        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
-    return total_loss, float(total_correct/total_sample) * 100.
+#     # Loop over all the examples in the evaluation set
+#     for i, batch in enumerate(tqdm(data_loader)):
+#         input, label = batch['input_ids'], batch['output']
+#         input = text2bow(input, vocab_size)
+#         input[:, pad_id] = 0
+#         logit = model.predict_log_proba(input)
+#         label = np.array(label.flatten()) 
+#         correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
+#         total_confusion += c_matrix
+#         total_correct += correct_n
+#         total_sample += sample_n
+#     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
+#     print(f'*** Confusion matrix:\n{total_confusion}')
+#     if write_file:
+#         with open(args.filename, "a") as write_file:
+#             write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+#             write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+#     return total_loss, float(total_correct/total_sample) * 100.
 
 
-# Training procedure (for the Naive Bayes models)
-def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
+# # Training procedure (for the Naive Bayes models)
+# def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
     pad_id = tokenizer.encode('[PAD]') # NEW
     print(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...')
     write_file.write(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...\n')
@@ -440,16 +527,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
-    parser.add_argument('--data_dir', default='/mnt/data/HUPD/distilled', type=str, help='Patent data directory.')
-    parser.add_argument('--dataset_load_path', default='/mnt/data/HUPD/patents-project-dataset/datasets/patents/patents.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
+    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
+    # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
-    parser.add_argument('--section', type=str, default='abstract', help='Patent application section of interest.')
-    parser.add_argument('--train_filing_start_date', type=str, default=None, help='Start date for filtering the training data.')
-    parser.add_argument('--train_filing_end_date', type=str, default=None, help='End date for filtering the training data.')
-    parser.add_argument('--val_filing_start_date', type=str, default=None, help='Start date for filtering the training data.')
-    parser.add_argument('--val_filing_end_date', type=str, default=None, help='End date for filtering the validation data.')
+    parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
+    parser.add_argument('--train_filing_start_date', type=str, default='2016-01-01', help='Start date for filtering the training data.')
+    parser.add_argument('--train_filing_end_date', type=str, default='2016-01-21', help='End date for filtering the training data.')
+    parser.add_argument('--val_filing_start_date', type=str, default="2016-01-22", help='Start date for filtering the training data.')
+    parser.add_argument('--val_filing_end_date', type=str, default="2016-01-31", help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
@@ -461,7 +549,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=3, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=100, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -469,17 +557,25 @@ if __name__ == '__main__':
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb project name.')
     parser.add_argument('--pos_class_weight', type=float, default=0, help='The class weight of the rejected class label (it is 0 by default).')
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
+    parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
+    parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
+
+    
+
     
     # Saving purposes
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
     # Model related params
-    parser.add_argument('--model_name', type=str, default='bert-base-uncased', help='Name of the model.')
+    model_path = ""
+    parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
-    parser.add_argument('--tokenizer_path', type=str, default=None, help='(Pre-trained) tokenizer path.')
-    parser.add_argument('--model_path', type=str, default=None, help='(Pre-trained) model path.')
-    parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
+    parser.add_argument('--model_path', type=str, default=model_path, help='(Pre-trained) model path.')
+    parser.add_argument('--tokenizer_path', type=str, default=model_path + "_tokenizer", help='(Pre-trained) tokenizer path.')
+    parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
+    # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
+
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
     parser.add_argument('--n_filters', type=int, default=25, help='Number of filters in the CNN (if applicable)')
     parser.add_argument('--filter_sizes', type=int, nargs='+', action='append', default=[[3,4,5], [5,6,7], [7,9,11]], help='Filter sizes for the CNN (if applicable).')
@@ -506,10 +602,19 @@ if __name__ == '__main__':
     filename = args.filename
     if filename is None:
         if args.model_name == 'naive_bayes':
+            os.makedirs(f"results/{args.model_name}{args.naive_bayes_version}", exist_ok=True)
             filename = f'./results/{args.model_name}/{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
         else:
+            os.makedirs(f"results/{args.model_name}", exist_ok=True)
             filename = f'./results/{args.model_name}/{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
+    args.filename = filename
     write_file = open(filename, "w")
+    
+    tensorboard_writer = ""
+    if args.tensorboard:
+        # os.makedirs(f"tensorboard", exist_ok=True)
+        t_path = f"./tensorboard/{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}" 
+        tensorboard_writer = tensorboard.SummaryWriter(log_dir=t_path)
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
     
@@ -519,8 +624,9 @@ if __name__ == '__main__':
 
     # Load the dataset dictionary
     dataset_dict = load_dataset(args.dataset_load_path , 
-        cache_dir=args.cache_dir,
-        data_dir=args.data_dir,
+        name=args.dataset_name,
+        # cache_dir=args.cache_dir,
+        # data_dir=args.data_dir,
         ipc_label=args.ipc_label,
         cpc_label= args.cpc_label,
         train_filing_start_date=args.train_filing_start_date, 
@@ -548,12 +654,14 @@ if __name__ == '__main__':
         n_classes = CLASSES,
         max_length=args.max_length
         )
-    
+
     print(f'*** CPC Label: {cat_label}') 
     print(f'*** Section: {args.section}')
     print(f'*** Vocabulary: {args.vocab_size}')
 
     if write_file:
+        now = datetime.datetime.now()
+        write_file.write(f'*** date time: {now.month}_{now.day}_hr_{now.hour}\n')
         write_file.write(f'*** CPC Label: {cat_label}\n')
         write_file.write(f'*** Section: {args.section}\n')
         write_file.write(f'*** Vocabulary: {args.vocab_size}\n')
@@ -602,8 +710,15 @@ if __name__ == '__main__':
             class_weights = torch.tensor([args.pos_class_weight, 1. - args.pos_class_weight]).to(device)
         else:
             class_weights = None
+
         # Loss function 
-        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+        # torch.nn.BCEWithLogitsLoss  #investigate binary loss
+        # if len(CLASS_NAMES)> 2:
+        if args.handle_skew_data:
+            total_examples = sum(train_label_stats.values())
+            class_weights = torch.tensor([(total_examples - train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data
+        print(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
         # wandb
         # assert wandb is not None
@@ -614,12 +729,25 @@ if __name__ == '__main__':
         if write_file:
             write_file.write(f'\nModel:\n {model}\nOptimizer: {optim}\n')
         
+        if args.save_path:
+            now = datetime.datetime.now()
+            args.save_path = f"{args.save_path}/{args.model_name}/date_{now.month}_{now.day}_hr_{now.hour}/"
+            os.makedirs(f"{args.save_path}", exist_ok=True)
+            with open(f"{args.save_path}arguments.json", "w") as file:
+                json.dump(args.__dict__, file)
+
         # Train and validate
-        train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file)
+        if write_file:
+            write_file.close()
+
+        if not args.validation:
+            train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file, tensorboard_writer)
+        else:
+            validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer)
 
         # Save the model
         if args.save_path:
-            tokenizer.save_pretrained(args.save_path + '_tokenizer')
-
+            model.save_pretrained(args.save_path + "final_model")
+            tokenizer.save_pretrained(args.save_path + 'final_tokenizer')
     if write_file:
         write_file.close()

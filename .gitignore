@@ -1,4 +1,6 @@
 *.txt
 *.bin
 *.json
+*.safetensors
+tensorboard
 *.gz
