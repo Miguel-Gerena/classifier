@@ -492,34 +492,34 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
 
 # # Training procedure (for the Naive Bayes models)
 # def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
-    pad_id = tokenizer.encode('[PAD]') # NEW
-    print(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...')
-    write_file.write(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...\n')
+#     pad_id = tokenizer.encode('[PAD]') # NEW
+#     print(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...')
+#     write_file.write(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...\n')
 
-    # Bernoulli or Multinomial?
-    if version == 'Bernoulli':
-        model = BernoulliNB(alpha=alpha) 
-    elif version == 'Multinomial':
-        model = MultinomialNB(alpha=alpha) 
+#     # Bernoulli or Multinomial?
+#     if version == 'Bernoulli':
+#         model = BernoulliNB(alpha=alpha) 
+#     elif version == 'Multinomial':
+#         model = MultinomialNB(alpha=alpha) 
     
-    # Loop over all the examples in the training set
-    for i, batch in enumerate(tqdm(data_loaders[0])):
-        input, decision = batch['input_ids'], batch['output']
-        input = text2bow(input, vocab_size) # change text2bow(input[0], vocab_size)
-        input[:, pad_id] = 0 # get rid of the paddings
-        label = np.array(decision.flatten())
-        # Using "partial fit", instead of "fit", to avoid any potential memory problems
-        # model.partial_fit(np.array([input]), np.array([label]), classes=CLASS_NAMES)
-        model.partial_fit(input, label, classes=CLASS_NAMES)
+#     # Loop over all the examples in the training set
+#     for i, batch in enumerate(tqdm(data_loaders[0])):
+#         input, decision = batch['input_ids'], batch['output']
+#         input = text2bow(input, vocab_size) # change text2bow(input[0], vocab_size)
+#         input[:, pad_id] = 0 # get rid of the paddings
+#         label = np.array(decision.flatten())
+#         # Using "partial fit", instead of "fit", to avoid any potential memory problems
+#         # model.partial_fit(np.array([input]), np.array([label]), classes=CLASS_NAMES)
+#         model.partial_fit(input, label, classes=CLASS_NAMES)
     
-    print('\n*** Accuracy on the training set ***')
-    validation_naive_bayes(data_loaders[0], model, vocab_size, 'training', write_file, pad_id)
-    print('\n*** Accuracy on the validation set ***')
-    validation_naive_bayes(data_loaders[1], model, vocab_size, 'validation', write_file, pad_id)
+#     print('\n*** Accuracy on the training set ***')
+#     validation_naive_bayes(data_loaders[0], model, vocab_size, 'training', write_file, pad_id)
+#     print('\n*** Accuracy on the validation set ***')
+#     validation_naive_bayes(data_loaders[1], model, vocab_size, 'validation', write_file, pad_id)
     
-    # Save the log probabilities if np_filename is specified
-    if np_filename:
-        np.save(f'{np_filename}.npy', np.array(model.feature_log_prob_))
+#     # Save the log probabilities if np_filename is specified
+#     if np_filename:
+#         np.save(f'{np_filename}.npy', np.array(model.feature_log_prob_))
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
