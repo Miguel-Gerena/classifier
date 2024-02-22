@@ -14,6 +14,7 @@ import collections
 from tqdm import tqdm
 import datetime
 import json
+import pandas as pd
 
 
 # wandb
@@ -70,7 +71,7 @@ random.seed(RANDOM_SEED)
 
 # Number of classes (ACCEPTED and REJECTED)
 CLASSES = 2
-CLASS_NAMES = [i for i in range(CLASSES)]
+CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
 # Create a BoW (Bag-of-Words) representation
 def text2bow(input, vocab_size):
@@ -211,7 +212,7 @@ def map_decision_to_string(example):
     return {'output': decision_to_str[example['decision']]}
 
 # Create dataset
-def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampler=True):
+def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampler=True, write_file=None):
     data_loaders = []
     for name in ['train', 'validation']:
         # Skip the training set if we are doing only inference
@@ -223,9 +224,22 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             print('*** Tokenizing...')
 
             # Tokenize the input
+            cols = pd.DataFrame(dataset)
+            if section == "combined":
+                cols["combined"] = cols["abstract"] + cols["claims"]
+                dataset = dataset.add_column(name="combined", column=cols["combined"])
+            print(f'*** Longest input in {name} dataset abstract: {cols["abstract"].str.len().max()}')
+            write_file.write(f'*** Longest input in {name} dataset abstract: {cols["abstract"].str.len().max()}\n')
+            print(f'*** Longest input in {name} dataset claims: {cols["claims"].str.len().max()}')
+            write_file.write(f'*** Longest input in {name} dataset claims: {cols["claims"].str.len().max()}\n')
+            print(f'*** Longest input in used {name} dataset {args.section}: {cols[f"{section}"].str.len().max()}')
+            write_file.write(f'*** Longest input in used {name} dataset {args.section}: {cols[f"{section}"].str.len().max()}')
+            del cols
+
             dataset = dataset.map(
                 lambda e: tokenizer(e[section], truncation=True, padding='max_length'),
                 batched=True)
+                
 
             # Set the dataset format
             dataset.set_format(type='torch', 
@@ -319,18 +333,18 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     print(f'*** Confusion matrix:\n{total_confusion}')
 
     if args.tensorboard:
-        tensorboard_writer.add_scalar('mean_loss/val', mean_loss, step)
-        tensorboard_writer.add_scalar('acc/val', acc, step)   
+        tensorboard_writer.add_scalar(f'val/{name}_mean_loss', mean_loss, step)
+        tensorboard_writer.add_scalar(f'val/{name}_acc', acc, step)   
 
-        tensorboard_writer.add_scalar('acc/torch_val', torch_metrics["acc"].compute(), step)   
-        tensorboard_writer.add_scalar('f1/torch_val', total_f1, step)   
-        tensorboard_writer.add_scalar('auc/torch_val', torch_metrics["auc"].compute(), step)   
+        tensorboard_writer.add_scalar(f'val/{name}_torch_acc', torch_metrics["acc"].compute(), step)   
+        tensorboard_writer.add_scalar(f'val/{name}_torch_f1', total_f1, step)   
+        tensorboard_writer.add_scalar(f'val/{name}_torch_auc', torch_metrics["auc"].compute(), step)   
 
 
     if write_file:
-        with open(args.filename, "a") as write_file:
-            write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-            write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+        write_file.flush()
 
     return mean_loss, float(acc) * 100., total_f1
 
@@ -339,13 +353,14 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None, tensorboard_writer=None):
     print('\n>>>Training starts...')
     if write_file:
-        with open(args.filename, "a") as write_file:
-            write_file.write(f'\n>>>Training starts...\n')
+        write_file.write(f'\n>>>Training starts...\n')
     # Training mode is on
     model.train()
     # Best validation set accuracy so far.
     best_val_acc = 0
     best_f1 = 0
+    validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
+    validation(args,data_loaders[1], model, criterion, device, name='validation', tensorboard_writer=tensorboard_writer, step=0)
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
@@ -374,8 +389,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 wandb.log({'Training Loss': loss})
             
             if args.tensorboard:
-                tensorboard_writer.add_scalar('loss/train', loss.item(), epoch * len(data_loaders[0]) + i)
-                tensorboard_writer.add_scalar('mean_loss/train', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
+                tensorboard_writer.add_scalar('train/loss', loss.item(), epoch * len(data_loaders[0]) + i)
+                tensorboard_writer.add_scalar('train/mean_loss', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
 
 
             # Print the loss every val_every step
@@ -383,8 +398,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 print(f'*** Loss: {loss}')
                 print(f'*** Input: {convert_ids_to_string(tokenizer, inputs[0])}')
                 if write_file:
-                    with open(args.filename, "a") as write_file:
-                        write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
+                    write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
                 # Get the performance of the model on the validation set
                 mean_loss, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
                 model.train()
@@ -412,12 +426,14 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                             tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
                         else:
                             torch.save(model.state_dict(), args.save_path)
-    
+
+        if epoch != 0 and epoch % args.validate_training_every_epoch == 0:
+            validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
+
     # Training is complete!
     print(f'\n ~ The End ~')
     if write_file:
-        with open(args.filename, "a") as write_file:
-            write_file.write('\n ~ The End ~\n')
+        write_file.write('\n ~ The End ~\n')
     
     # Final evaluation on the validation set
     _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer)
@@ -445,53 +461,48 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     
     # Additionally, print the performance of the model on the training set if we were not doing only inference
     if not args.validation:
-        _, train_val_acc, f1_acc = validation(args, data_loaders[0], model, criterion, device, name='train')
-        print(f'*** Accuracy on the training set: {train_val_acc}.')
-        if write_file:
-            with open(args.filename, "a") as write_file:
-                write_file.write(f'\n*** Accuracy on the training set: {train_val_acc}.')
-                write_file.write(f'\n*** f1 on the training set: {f1_acc}.')
+        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
     
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
     print(f'*** Highest f1 accuract on the validation set: {best_f1}.')
 
     if write_file:
-        with open(args.filename, "a") as write_file:
-            write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
-            write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
+        write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
+        write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
 
 
 
-# # Evaluation procedure (for the Naive Bayes models)
-# def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
-#     total_loss = 0.
-#     total_correct = 0
-#     total_sample = 0
-#     total_confusion = np.zeros((CLASSES, CLASSES))
+ 
+
+# Evaluation procedure (for the Naive Bayes models)
+def validation_naive_bayes(data_loader, model, vocab_size, name='validation', write_file=None, pad_id=-1):
+    total_loss = 0.
+    total_correct = 0
+    total_sample = 0
+    total_confusion = np.zeros((CLASSES, CLASSES))
     
-#     # Loop over all the examples in the evaluation set
-#     for i, batch in enumerate(tqdm(data_loader)):
-#         input, label = batch['input_ids'], batch['output']
-#         input = text2bow(input, vocab_size)
-#         input[:, pad_id] = 0
-#         logit = model.predict_log_proba(input)
-#         label = np.array(label.flatten()) 
-#         correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
-#         total_confusion += c_matrix
-#         total_correct += correct_n
-#         total_sample += sample_n
-#     print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
-#     print(f'*** Confusion matrix:\n{total_confusion}')
-#     if write_file:
-#         with open(args.filename, "a") as write_file:
-#             write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-#             write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
-#     return total_loss, float(total_correct/total_sample) * 100.
+    # Loop over all the examples in the evaluation set
+    for i, batch in enumerate(tqdm(data_loader)):
+        input, label = batch['input_ids'], batch['output']
+        input = text2bow(input, vocab_size)
+        input[:, pad_id] = 0
+        logit = model.predict_log_proba(input)
+        label = np.array(label.flatten()) 
+        correct_n, sample_n, c_matrix = measure_accuracy(logit, label)
+        total_confusion += c_matrix
+        total_correct += correct_n
+        total_sample += sample_n
+    print(f'*** Accuracy on the {name} set: {total_correct/total_sample}')
+    print(f'*** Confusion matrix:\n{total_confusion}')
+    if write_file:
+        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
+    return total_loss, float(total_correct/total_sample) * 100.
 
 
-# # Training procedure (for the Naive Bayes models)
-# def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
+# Training procedure (for the Naive Bayes models)
+def train_naive_bayes(data_loaders, tokenizer, vocab_size, version='Bernoulli', alpha=1.0, write_file=None, np_filename=None):
     pad_id = tokenizer.encode('[PAD]') # NEW
     print(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...')
     write_file.write(f'Training a {version} Naive Bayes classifier (with alpha = {alpha})...\n')
@@ -534,23 +545,25 @@ if __name__ == '__main__':
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
     parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
-    parser.add_argument('--train_filing_start_date', type=str, default='2016-01-01', help='Start date for filtering the training data.')
-    parser.add_argument('--train_filing_end_date', type=str, default='2016-01-21', help='End date for filtering the training data.')
-    parser.add_argument('--val_filing_start_date', type=str, default="2016-01-22", help='Start date for filtering the training data.')
-    parser.add_argument('--val_filing_end_date', type=str, default="2016-01-31", help='End date for filtering the validation data.')
+    parser.add_argument('--train_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
+    parser.add_argument('--train_filing_end_date', type=str, default='', help='End date for filtering the training data.')
+    parser.add_argument('--val_filing_start_date', type=str, default="", help='Start date for filtering the training data.')
+    parser.add_argument('--val_filing_end_date', type=str, default="", help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
     parser.add_argument('--use_wsampler', action='store_true', help='Use a weighted sampler (for the training set).')
     parser.add_argument('--val_set_balancer', action='store_true', help='Use a balanced set for validation? That is, do you want the same number of classes of examples in the validation set.')
-    parser.add_argument('--uniform_split', action='store_true', help='Uniformly split the data into training and validation sets.')
+    parser.add_argument('--uniform_split', default=True, help='Uniformly split the data into training and validation sets.')
+    # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', action='store_true', help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=100, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=60, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
+    parser.add_argument('--validate_training_every_epoch', type=int, default=10, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
@@ -599,21 +612,27 @@ if __name__ == '__main__':
     if args.validation and args.model_path is not None and args.tokenizer_path is None:
         args.tokenizer_path = args.model_path + '_tokenizer'
 
+    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}"
+    if args.save_path and not args.validation:
+        now = datetime.datetime.now()
+        args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
+        os.makedirs(f"{args.save_path}", exist_ok=True)
+        with open(f"{args.save_path}arguments.json", "w") as file:
+            json.dump(args.__dict__, file)
+    
     filename = args.filename
     if filename is None:
         if args.model_name == 'naive_bayes':
-            os.makedirs(f"results/{args.model_name}{args.naive_bayes_version}", exist_ok=True)
-            filename = f'./results/{args.model_name}/{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
+            filename = f'{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
         else:
-            os.makedirs(f"results/{args.model_name}", exist_ok=True)
-            filename = f'./results/{args.model_name}/{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
-    args.filename = filename
-    write_file = open(filename, "w")
-    
+            filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
+    args.filename = args.save_path + filename
+    write_file = open(args.filename, "w")
+
     tensorboard_writer = ""
-    if args.tensorboard:
+    if args.tensorboard and not args.validation:
+        t_path = "./tensorboard/"  + f"{path_params}_date_{now.month}_{now.day}_hr_{now.hour}"
         # os.makedirs(f"tensorboard", exist_ok=True)
-        t_path = f"./tensorboard/{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}" 
         tensorboard_writer = tensorboard.SummaryWriter(log_dir=t_path)
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
@@ -660,7 +679,6 @@ if __name__ == '__main__':
     print(f'*** Vocabulary: {args.vocab_size}')
 
     if write_file:
-        now = datetime.datetime.now()
         write_file.write(f'*** date time: {now.month}_{now.day}_hr_{now.hour}\n')
         write_file.write(f'*** CPC Label: {cat_label}\n')
         write_file.write(f'*** Section: {args.section}\n')
@@ -677,7 +695,8 @@ if __name__ == '__main__':
         dataset_dict = dataset_dict, 
         tokenizer = tokenizer, 
         section = args.section,
-        use_wsampler=args.use_wsampler
+        use_wsampler=args.use_wsampler,
+        write_file=write_file
         )
     del dataset_dict
 
@@ -685,8 +704,10 @@ if __name__ == '__main__':
         # Print the statistics
         train_label_stats = dataset_statistics(args, data_loaders[0], tokenizer)
         print(f'*** Training set label statistics: {train_label_stats}')
+
         val_label_stats = dataset_statistics(args, data_loaders[1], tokenizer)
         print(f'*** Validation set label statistics: {val_label_stats}')
+
         if write_file:
             write_file.write(f'*** Training set label statistics: {train_label_stats}\n')
             write_file.write(f'*** Validation set label statistics: {val_label_stats}\n\n')
@@ -714,10 +735,12 @@ if __name__ == '__main__':
         # Loss function 
         # torch.nn.BCEWithLogitsLoss  #investigate binary loss
         # if len(CLASS_NAMES)> 2:
-        if args.handle_skew_data:
+        if args.handle_skew_data and not args.validation:
             total_examples = sum(train_label_stats.values())
             class_weights = torch.tensor([(total_examples - train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data
         print(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
+        write_file.write(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
+
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
         # wandb
@@ -729,25 +752,17 @@ if __name__ == '__main__':
         if write_file:
             write_file.write(f'\nModel:\n {model}\nOptimizer: {optim}\n')
         
-        if args.save_path:
-            now = datetime.datetime.now()
-            args.save_path = f"{args.save_path}/{args.model_name}/date_{now.month}_{now.day}_hr_{now.hour}/"
-            os.makedirs(f"{args.save_path}", exist_ok=True)
-            with open(f"{args.save_path}arguments.json", "w") as file:
-                json.dump(args.__dict__, file)
+
 
         # Train and validate
-        if write_file:
-            write_file.close()
-
         if not args.validation:
             train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file, tensorboard_writer)
+            if args.save_path:
+                model.save_pretrained(args.save_path + "final_model")
+                tokenizer.save_pretrained(args.save_path + 'final_tokenizer')
         else:
             validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer)
 
         # Save the model
-        if args.save_path:
-            model.save_pretrained(args.save_path + "final_model")
-            tokenizer.save_pretrained(args.save_path + 'final_tokenizer')
     if write_file:
         write_file.close()

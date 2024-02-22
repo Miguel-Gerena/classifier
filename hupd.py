@@ -127,23 +127,42 @@ class Patents(datasets.GeneratorBasedBuilder):
     # This is an example of a dataset with multiple configurations.
     # If you don't want/need to define several sub-sets in your dataset,
     # just remove the BUILDER_CONFIG_CLASS and the BUILDER_CONFIGS attributes.
+
     BUILDER_CONFIG_CLASS = PatentsConfig
     BUILDER_CONFIGS = [
         PatentsConfig(
             name="sample", 
             description="Patent data from January 2016, for debugging", 
-            metadata_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/hupd_metadata_jan16_2022-02-22.feather",
-            data_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/data/sample-jan-2016.tar.gz",
-            data_dir="sample",  # this will unpack to data/sample/2016
+            metadata_url="D:/classes/CS224N/HUPD_dataset/sample_hupd_metadata_jan16_2022-02-22.feather",
+            data_url="",
+            data_dir="D:/classes/CS224N/HUPD_dataset/sample/sample",   # this will unpack to data/{year}
         ),
         PatentsConfig(
             name="all", 
             description="Patent data from all years (2004-2018)", 
-            metadata_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/hupd_metadata_2022-02-22.feather",
-            data_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/data/all-years.tar",
-            data_dir="data",   # this will unpack to data/{year}
+            metadata_url="D:/classes/CS224N/HUPD_dataset/hupd_metadata_2022-02-22.feather",
+            data_url="",
+            data_dir="D:/classes/CS224N/HUPD_dataset/data",   # this will unpack to data/{year}
         ),
+        
     ]
+    # BUILDER_CONFIGS = [
+    #     PatentsConfig(
+    #         name="sample", 
+    #         description="Patent data from January 2016, for debugging", 
+    #         metadata_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/hupd_metadata_jan16_2022-02-22.feather",
+    #         data_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/data/sample-jan-2016.tar.gz",
+    #         data_dir="sample",  # this will unpack to data/sample/2016
+    #     ),
+    #     PatentsConfig(
+    #         name="all", 
+    #         description="Patent data from all years (2004-2018)", 
+    #         metadata_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/hupd_metadata_2022-02-22.feather",
+    #         data_url="https://huggingface.co/datasets/HUPD/hupd/resolve/main/data/all-years.tar",
+    #         data_dir="data",   # this will unpack to data/{year}
+    #     ),
+    # ]
+
 
     def _info(self):
         return datasets.DatasetInfo(
@@ -168,13 +187,17 @@ class Patents(datasets.GeneratorBasedBuilder):
         # Download metadata
         # NOTE: Metadata is stored as a Pandas DataFrame in Apache Feather format
         metadata_url = self.config.metadata_url
-        metadata_file = dl_manager.download_and_extract(self.config.metadata_url)
+        metadata_file = metadata_url
+        if self.config.metadata_url[0:5] == "https":
+            metadata_file = dl_manager.download_and_extract(self.config.metadata_url)
         print(f'Using metadata file: {metadata_file}')
 
         # Download data
         # NOTE: The extracted path contains a subfolder, data_dir. This directory holds
         # a large number of json files (one json file per patent application).
-        download_dir = dl_manager.download_and_extract(self.config.data_url)
+        download_dir = ""
+        if self.config.metadata_url[0:5] == "https":
+            download_dir = dl_manager.download_and_extract(self.config.data_url)
         json_dir = os.path.join(download_dir, self.config.data_dir)
 
         # Load metadata file
@@ -216,6 +239,7 @@ class Patents(datasets.GeneratorBasedBuilder):
                 
 
                 import tarfile
+                print("local ", "*" * 20)
                 for year in full_year_range:
                     tar_file_path = f'{json_dir}/{year}.tar.gz'
                     print(f'Extracting {tar_file_path}')
