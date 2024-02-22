@@ -7,3 +7,10 @@ accelerate
 torch==2.2.0+cu121
 
 # pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+
+
+# pip install torch==2.2.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
+# pip uninstall bitsandbytes
+# pip uninstall bitsandbytes-windows
+# pip install https://github.com/jllllll/bitsandbytes-windows-webui/releases/download/wheels/bitsandbytes-0.41.1-py3-none-win_amd64.whl
