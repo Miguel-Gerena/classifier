@@ -130,41 +130,44 @@ class Patents(datasets.GeneratorBasedBuilder):
     # just remove the BUILDER_CONFIG_CLASS and the BUILDER_CONFIGS attributes.
 
     BUILDER_CONFIG_CLASS = PatentsConfig
-    BUILDER_CONFIGS = [
-        PatentsConfig(
-            name="sample", 
-            description="Patent data from January 2016, for debugging", 
-            metadata_url="./sample_hupd_metadata_jan16_2022-02-22.feather",
-            data_url="",
-            data_dir="./data/sample/sample",   # this will unpack to data/{year}
-        ),
-        PatentsConfig(
-            name="all", 
-            description="Patent data from all years (2004-2018)", 
-            metadata_url="./hupd_metadata_2022-02-22.feather",
-            data_url="",
-            data_dir="./data",   # this will unpack to data/{year}
-        ),
-        
-    ]
+    if os.getlogin() == "darke":
+        BUILDER_CONFIGS = [
+            PatentsConfig(
+                name="sample", 
+                description="Patent data from January 2016, for debugging", 
+                metadata_url="D:/classes/CS224N/HUPD_dataset/sample_hupd_metadata_jan16_2022-02-22.feather",
+                data_url="",
+                data_dir="D:/classes/CS224N/HUPD_dataset/sample/sample",   # this will unpack to data/{year}
+            ),
+            PatentsConfig(
+                name="all", 
+                description="Patent data from all years (2004-2018)", 
+                metadata_url="D:/classes/CS224N/HUPD_dataset/hupd_metadata_2022-02-22.feather",
+                data_url="",
+                data_dir="D:/classes/CS224N/HUPD_dataset/data",   # this will unpack to data/{year}
+            ),
+            
+        ]
+    else:
+        BUILDER_CONFIGS = [
+            PatentsConfig(
+                name="sample", 
+                description="Patent data from January 2016, for debugging", 
+                metadata_url="./sample_hupd_metadata_jan16_2022-02-22.feather",
+                data_url="",
+                data_dir="./data/sample/sample",   # this will unpack to data/{year}
+            ),
+            PatentsConfig(
+                name="all", 
+                description="Patent data from all years (2004-2018)", 
+                metadata_url="./hupd_metadata_2022-02-22.feather",
+                data_url="",
+                data_dir="./data",   # this will unpack to data/{year}
+            ),
+            
+        ]
 
-    # BUILDER_CONFIGS = [
-    #     PatentsConfig(
-    #         name="sample", 
-    #         description="Patent data from January 2016, for debugging", 
-    #         metadata_url="D:/classes/CS224N/HUPD_dataset/sample_hupd_metadata_jan16_2022-02-22.feather",
-    #         data_url="",
-    #         data_dir="D:/classes/CS224N/HUPD_dataset/sample/sample",   # this will unpack to data/{year}
-    #     ),
-    #     PatentsConfig(
-    #         name="all", 
-    #         description="Patent data from all years (2004-2018)", 
-    #         metadata_url="D:/classes/CS224N/HUPD_dataset/hupd_metadata_2022-02-22.feather",
-    #         data_url="",
-    #         data_dir="D:/classes/CS224N/HUPD_dataset/data",   # this will unpack to data/{year}
-    #     ),
-        
-    # ]
+
     # BUILDER_CONFIGS = [
     #     PatentsConfig(
     #         name="sample", 

@@ -418,8 +418,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                             torch.save(model.state_dict(), args.save_path)
 
 
-        if epoch != 0 and epoch % args.validate_training_every_epoch == 0:
-            validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
+        if (epoch * len(data_loaders[0]) + i) % args.validate_training_every_epoch == 0 and i !=0:
+            validation(args, data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
 
     # Training is complete!
     print(f'\n ~ The End ~')
@@ -552,9 +552,9 @@ if __name__ == '__main__':
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=60, help='Number of epochs (for training).')
+    parser.add_argument('--epoch_n', type=int, default=3, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
-    parser.add_argument('--validate_training_every_epoch', type=int, default=10, help='Number of iterations we should take to perform training validation.')
+    parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
@@ -563,8 +563,6 @@ if __name__ == '__main__':
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
     parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
-
-    
 
     
     # Saving purposes
