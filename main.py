@@ -89,9 +89,10 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                              dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
     special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
 
-    if args.validation:
+    if args.validation or args.continue_training:
         if model_name == 'distilbert-base-uncased':
             if args.model_path:
+                print("**" * 4, "Loading Pre-trained weights", "**" * 4)
                 tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
                 model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
             else:
@@ -223,22 +224,16 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             
             print('*** Tokenizing...')
 
-            # Tokenize the input
-            cols = pd.DataFrame(dataset)
-            if section == "combined":
-                cols["combined"] = cols["abstract"] + cols["claims"]
-                dataset = dataset.add_column(name="combined", column=cols["combined"])
-            print(f'*** Longest input in {name} dataset abstract: {cols["abstract"].str.len().max()}')
-            write_file.write(f'*** Longest input in {name} dataset abstract: {cols["abstract"].str.len().max()}\n')
-            print(f'*** Longest input in {name} dataset claims: {cols["claims"].str.len().max()}')
-            write_file.write(f'*** Longest input in {name} dataset claims: {cols["claims"].str.len().max()}\n')
-            print(f'*** Longest input in used {name} dataset {args.section}: {cols[f"{section}"].str.len().max()}')
-            write_file.write(f'*** Longest input in used {name} dataset {args.section}: {cols[f"{section}"].str.len().max()}')
-            del cols
+            def combine(data):
+                return {"examiner":f"Examiner id: {data["examiner_id"][:-2]} " + data["claims"]}
+            
+            if section == "examiner":
+                dataset = dataset.map(combine, num_proc=args.num_proc)
+            
 
             dataset = dataset.map(
                 lambda e: tokenizer(e[section], truncation=True, padding='max_length'),
-                batched=True)
+                batched=True, num_proc=args.num_proc)
                 
 
             # Set the dataset format
@@ -359,8 +354,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     # Best validation set accuracy so far.
     best_val_acc = 0
     best_f1 = 0
-    validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
-    validation(args,data_loaders[1], model, criterion, device, name='validation', tensorboard_writer=tensorboard_writer, step=0)
+    # validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
+    # validation(args,data_loaders[1], model, criterion, device, name='validation', tensorboard_writer=tensorboard_writer, step=0)
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
@@ -416,10 +411,16 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                             tokenizer.save_pretrained(args.save_path + 'tokenizer')
                         else:
                             torch.save(model.state_dict(), args.save_path)
-
-
-        if (epoch * len(data_loaders[0]) + i) % args.validate_training_every_epoch == 0 and i !=0:
-            validation(args, data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
+    
+        if args.save_path:
+            # If the model is a Transformer architecture, make sure to save the tokenizer as well
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                model.save_pretrained(args.save_path + 'epoch_model')
+                tokenizer.save_pretrained(args.save_path + 'epoch_tokenizer')
+            else:
+                torch.save(model.state_dict(), args.save_path) 
+        # if (epoch * len(data_loaders[0]) + i) % args.validate_training_every_epoch == 0 and i !=0:
+        #     validation(args, data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
 
     # Training is complete!
     print(f'\n ~ The End ~')
@@ -427,7 +428,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         write_file.write('\n ~ The End ~\n')
     
     # Final evaluation on the validation set
-    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer)
+    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
@@ -452,7 +453,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     
     # Additionally, print the performance of the model on the training set if we were not doing only inference
     if not args.validation:
-        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
+        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
     
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
@@ -546,14 +547,15 @@ if __name__ == '__main__':
     parser.add_argument('--use_wsampler', action='store_true', help='Use a weighted sampler (for the training set).')
     parser.add_argument('--val_set_balancer', action='store_true', help='Use a balanced set for validation? That is, do you want the same number of classes of examples in the validation set.')
     parser.add_argument('--uniform_split', default=True, help='Uniformly split the data into training and validation sets.')
+    parser.add_argument('--num_proc', default=8, help='Number of processors to use for preprocessing data')
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=3, help='Number of epochs (for training).')
-    parser.add_argument('--val_every', type=int, default=500, help='Number of iterations we should take to perform validation.')
+    parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
+    parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
@@ -563,6 +565,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
     parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
+    parser.add_argument('--continue_training', type=bool, default=False, help='Load weights and continue training')
 
     
     # Saving purposes
@@ -570,11 +573,11 @@ if __name__ == '__main__':
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
     # Model related params
-    model_path = ""
+    model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_3_16_2e-05_512_200_date_2_22_hr_23/"
     parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
-    parser.add_argument('--model_path', type=str, default=model_path, help='(Pre-trained) model path.')
-    parser.add_argument('--tokenizer_path', type=str, default=model_path + "_tokenizer", help='(Pre-trained) tokenizer path.')
+    parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
+    parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
     parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
@@ -601,7 +604,7 @@ if __name__ == '__main__':
     if args.validation and args.model_path is not None and args.tokenizer_path is None:
         args.tokenizer_path = args.model_path + '_tokenizer'
 
-    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}"
+    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -646,7 +649,7 @@ if __name__ == '__main__':
         )
 
     for name in ['train', 'validation']:
-        dataset_dict[name] = dataset_dict[name].map(map_decision_to_string)
+        dataset_dict[name] = dataset_dict[name].map(map_decision_to_string, num_proc=args.num_proc)
         # Remove the pending and CONT-patent applications
         dataset_dict[name] = dataset_dict[name].filter(lambda e: e['output'] <= 1)
     
@@ -726,7 +729,9 @@ if __name__ == '__main__':
         # if len(CLASS_NAMES)> 2:
         if args.handle_skew_data and not args.validation:
             total_examples = sum(train_label_stats.values())
-            class_weights = torch.tensor([(total_examples - train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data
+            class_weights = torch.tensor([(train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data.  
+            # The weights are in order 0:weight, 1:weight.  Since the class names are in descending order, we have the weight be the fraction instead of the total - fraction.
+
         print(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
         write_file.write(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
 
