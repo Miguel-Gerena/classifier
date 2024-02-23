@@ -237,6 +237,7 @@ class Patents(datasets.GeneratorBasedBuilder):
 
         # Filter based on ICPR / CPC label
         if self.config.ipcr_label:
+
             print(f'Filtering by IPCR label: {self.config.ipcr_label}')
             df = df[df['main_ipcr_label'].str.startswith(self.config.ipcr_label)]
         elif self.config.cpc_label:
@@ -275,7 +276,7 @@ class Patents(datasets.GeneratorBasedBuilder):
             final_df = pd.DataFrame()
             for file in os.listdir(json_dir):
                 year = file.split(".")
-                if len(year) == 1:
+                if len(year) == 1 and year[0] in ['2013', '2017']:
                     print(year)
                     start  = f"{year[0]}-01-01"
                     end = f"{year[0]}-12-31"
