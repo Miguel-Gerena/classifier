@@ -153,9 +153,9 @@ class Patents(datasets.GeneratorBasedBuilder):
             PatentsConfig(
                 name="sample", 
                 description="Patent data from January 2016, for debugging", 
-                metadata_url="./sample_hupd_metadata_jan16_2022-02-22.feather",
+                metadata_url="./hupd_metadata_jan16_2022-02-22.feather",
                 data_url="",
-                data_dir="./data/sample/sample",   # this will unpack to data/{year}
+                data_dir="./data/sample",   # this will unpack to data/{year}
             ),
             PatentsConfig(
                 name="all", 
