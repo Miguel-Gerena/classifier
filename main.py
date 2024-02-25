@@ -40,6 +40,7 @@ from transformers import GPT2ForSequenceClassification, GPT2Tokenizer, GPT2Confi
 from transformers import LongformerForSequenceClassification, LongformerTokenizer, LongformerConfig
 from transformers import PreTrainedTokenizerFast
 
+
 # Import the sklearn Multinomial Naive Bayes
 from sklearn.naive_bayes import BernoulliNB, MultinomialNB
 
@@ -102,6 +103,10 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             # This step is actually important.
             tokenizer.max_length = max_length
             tokenizer.model_max_length = max_length
+        elif model_name == 'mistralai/Mistral-7B-v0.1':
+            config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
+            model = AutoModelForSequenceClassification.from_config(config)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
         else:
             raise NotImplementedError
     else:
@@ -256,7 +261,7 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
                     write_file.write(f'*** Set: {name} (using a weighted sampler).\n')
                     write_file.write(f'*** Weights: {weight}\n')
             else:
-                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size, shuffle=(name=='train')))
+                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')))
     return data_loaders
 
 
@@ -282,6 +287,8 @@ def convert_ids_to_string(tokenizer, input):
 
 # Evaluation procedure (for the neural models)
 def validation(args, val_loader, model, criterion, device, name='validation', write_file=None, tensorboard_writer=None, step = 0, use_torch_metrics=True):
+    if name=="train":
+        val_loader = DataLoader(val_loader, batch_size=args.batch_size["validation"])
     model.eval()
     total_loss = 0.
     total_correct = 0
@@ -326,6 +333,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
     # Print the performance of the model on the validation set 
     print(f'*** Accuracy on the {name} set: {acc}')
+    print(f'*** F1 on the {name} set: {total_f1}')
     print(f'*** Confusion matrix:\n{total_confusion}')
 
     if args.tensorboard:
@@ -339,9 +347,12 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
     if write_file:
         write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
+        write_file.write(f'*** F1 on the {name} set: {total_f1}\n')
         write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
         write_file.flush()
-
+    
+    if name=="train":
+        del val_loader
     return mean_loss, float(acc) * 100., total_f1
 
 
@@ -537,11 +548,11 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
-    parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
+    parser.add_argument('--section', type=str, default='abstract', help='Patent application section of interest.')
     parser.add_argument('--train_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
     parser.add_argument('--train_filing_end_date', type=str, default='', help='End date for filtering the training data.')
-    parser.add_argument('--val_filing_start_date', type=str, default="", help='Start date for filtering the training data.')
-    parser.add_argument('--val_filing_end_date', type=str, default="", help='End date for filtering the validation data.')
+    parser.add_argument('--val_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
+    parser.add_argument('--val_filing_end_date', type=str, default='', help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
@@ -554,7 +565,7 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
-    parser.add_argument('--batch_size', type=int, default=16, help='Batch size.')
+    parser.add_argument('--batch_size', type=dict, default={'train':16, 'validation':48}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
@@ -573,9 +584,10 @@ if __name__ == '__main__':
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
+
+    mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    # model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_3_16_2e-05_512_200_date_2_22_hr_23/"
-    model_path = "./CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/"
+    model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_False_all_date_2_24_hr_2/"
     parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
@@ -603,10 +615,8 @@ if __name__ == '__main__':
     else:
         cat_label = 'All_IPCs'
 
-    if args.validation and args.model_path is not None and args.tokenizer_path is None:
-        args.tokenizer_path = args.model_path + '_tokenizer'
 
-    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}"
+    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size["train"]}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -621,7 +631,20 @@ if __name__ == '__main__':
         else:
             filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
-    write_file = open(args.filename, "w")
+
+    write_file = ""
+    if args.validation:
+        write_file = ""
+        args.tensorboard = None
+        args.uniform_split = False
+        args.val_set_balancer = True
+        args.train_filing_start_date = '2016-01-01'
+        args.train_filing_end_date = '2016-01-21'
+        args.val_filing_start_date = '2016-01-01'
+        args.val_filing_end_date = '2016-01-31'
+
+    else:
+        write_file = open(args.filename, "w")
 
     tensorboard_writer = ""
     if args.tensorboard and not args.validation:
@@ -699,12 +722,20 @@ if __name__ == '__main__':
         train_label_stats = dataset_statistics(args, data_loaders[0], tokenizer)
         print(f'*** Training set label statistics: {train_label_stats}')
 
-        val_label_stats = dataset_statistics(args, data_loaders[1], tokenizer)
-        print(f'*** Validation set label statistics: {val_label_stats}')
 
-        if write_file:
-            write_file.write(f'*** Training set label statistics: {train_label_stats}\n')
-            write_file.write(f'*** Validation set label statistics: {val_label_stats}\n\n')
+    val_label_stats = dataset_statistics(args, data_loaders[1], tokenizer)
+    print(f'*** Validation set label statistics: {val_label_stats}')
+    # print(f'*** Training set longest {args.section}: {longest_train_section}')
+    # print(f'*** Training set longest {args.section}: {longest_val_section}')
+    # write_file.write(f'*** Training set longest {args.section}: {longest_train_section}')
+    # write_file.write(f'*** Training set longest {args.section}: {longest_val_section}')
+
+
+
+    if write_file:
+        write_file.write(f'*** Training set label statistics: {train_label_stats}\n')
+        write_file.write(f'*** Validation set label statistics: {val_label_stats}\n\n')
+
     
 
     if args.model_name == 'naive_bayes': 
@@ -735,7 +766,8 @@ if __name__ == '__main__':
             # The weights are in order 0:weight, 1:weight.  Since the class names are in descending order, we have the weight be the fraction instead of the total - fraction.
 
         print(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
-        write_file.write(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
+        if write_file:
+            write_file.write(f"*** class weights used for loss {class_weights} class order {CLASS_NAMES}")
 
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
