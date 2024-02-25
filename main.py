@@ -225,7 +225,8 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             print('*** Tokenizing...')
 
             def combine(data):
-                return {"examiner":f"Examiner id: {data["examiner_id"][:-2]} " + data["claims"]}
+                # return {"examiner":f"Examiner id: {data["examiner_id"][:-2]} " + data["claims"]}
+                return {"examiner": f"Examiner id: {data['examiner_id'][:-2]} " + data['claims']}
             
             if section == "examiner":
                 dataset = dataset.map(combine, num_proc=args.num_proc)
@@ -432,7 +433,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
-        # Save the best model so fare
+        # Save the best model so far
         if args.save_path:
             if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
                 model.save_pretrained(args.save_path + 'model')
@@ -573,7 +574,8 @@ if __name__ == '__main__':
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
     # Model related params
-    model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_3_16_2e-05_512_200_date_2_22_hr_23/"
+    # model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_3_16_2e-05_512_200_date_2_22_hr_23/"
+    model_path = "./CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/"
     parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
