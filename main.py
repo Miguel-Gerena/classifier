@@ -132,15 +132,19 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 config = LongformerConfig(num_labels=CLASSES, output_hidden_states=False) 
                 tokenizer = LongformerTokenizer.from_pretrained(model_name, do_lower_case=True)
                 model = LongformerForSequenceClassification(config=config)
+            elif model_name == 'mistralai/Mistral-7B-v0.1':
+                config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
             else:
                 raise NotImplementedError()
 
         # Finetune
         else:
-            if model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+            if model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
                 config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                if model_name == 'gpt2':
+                if model_name == 'gpt2' or model_name == 'mistralai/Mistral-7B-v0.1':
                     tokenizer.pad_token = tokenizer.eos_token
                 tokenizer.max_length = max_length
                 tokenizer.model_max_length = max_length
@@ -197,7 +201,7 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             else:
                 raise NotImplementedError()
             
-    if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+    if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
         print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
     else:
         print(model)
@@ -230,7 +234,6 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             print('*** Tokenizing...')
 
             def combine(data):
-                # return {"examiner":f"Examiner id: {data["examiner_id"][:-2]} " + data["claims"]}
                 return {"examiner": f"Examiner id: {data['examiner_id'][:-2]} " + data['claims']}
             
             if section == "examiner":
@@ -418,7 +421,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                     # Save the model if a save directory is specified
                     if args.save_path:
                         # If the model is a Transformer architecture, make sure to save the tokenizer as well
-                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
                             model.save_pretrained(args.save_path + 'model')
                             tokenizer.save_pretrained(args.save_path + 'tokenizer')
                         else:
@@ -426,7 +429,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     
         if args.save_path:
             # If the model is a Transformer architecture, make sure to save the tokenizer as well
-            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
                 model.save_pretrained(args.save_path + 'epoch_model')
                 tokenizer.save_pretrained(args.save_path + 'epoch_tokenizer')
             else:
@@ -446,7 +449,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         
         # Save the best model so far
         if args.save_path:
-            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
                 model.save_pretrained(args.save_path + 'model')
             else:
                 torch.save(model.state_dict(), args.save_path)
@@ -456,7 +459,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         # Save the model if a save directory is specified
         if args.save_path:
             # If the model is a Transformer architecture, make sure to save the tokenizer as well
-            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096']:
+            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
                 model.save_pretrained(args.save_path + "f1_model")
                 tokenizer.save_pretrained(args.save_path + 'f1_tokenizer')
             else:
@@ -587,7 +590,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    model_path = "./CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_False_all_date_2_24_hr_2/"
+    model_path = "./CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/"
     parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
@@ -616,7 +619,7 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size["train"]}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}"
+    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"

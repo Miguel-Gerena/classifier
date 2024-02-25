@@ -1,5 +1,6 @@
 import os
-PATH =  "D:/classes/cache/huggingface/hub"
+# PATH =  "D:/classes/cache/huggingface/hub"
+PATH =  "C:/Users/akayl/.cache/huggingface/hub"
 os.environ['TRANSFORMERS_CACHE'] = PATH
 os.environ['HF_HOME'] = PATH
 os.environ['HF_DATASETS_CACHE'] = PATH
