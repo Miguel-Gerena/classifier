@@ -31,7 +31,7 @@ class CustomizedMistralModel(nn.Module):
         # Adding a classifier on top of the base model
         self.classifier = nn.Linear(self.config.hidden_size, num_labels)
         
-        # Optionally, apply dropout for regularization
+        # Dropout for regularization
         self.dropout = nn.Dropout(dropout_prob)
         
     def apply_lora(self):
