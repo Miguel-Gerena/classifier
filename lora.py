@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoConfig
-
+import attention
 class LoRALayer(nn.Module):
     def __init__(self, model_dim, rank, adapter_size=None):
         super(LoRALayer, self).__init__()
@@ -23,31 +23,29 @@ class LoRALayer(nn.Module):
         return W + lora_adaptation
     
 
-class LoRATransformerModel(nn.Module):
-    def __init__(self, pretrained_model_name_or_path, rank):
-        super(LoRATransformerModel, self).__init__()
-        self.config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
-        self.base_model = AutoModel.from_pretrained(pretrained_model_name_or_path, config=self.config)
+# class LoRATransformerModel(nn.Module):
+#     def __init__(self, pretrained_model_name_or_path, rank):
+#         super(LoRATransformerModel, self).__init__()
+#         self.config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+#         self.base_model = AutoModel.from_pretrained(pretrained_model_name_or_path, config=self.config)
         
-        model_dim = self.config.hidden_size
+#         self.custom_attention = attention.CustomAttention(self.config)
+#         self.lora_adaptations = nn.ModuleList([LoRALayer(self.config.hidden_size, rank) for _ in range(self.config.num_hidden_layers)])
+    
+#     def forward(self, input_ids, attention_mask=None):
+#         # Get embeddings from base model
+#         embeddings = self.base_model.embeddings(input_ids)
         
-        # Create a LoRA layer for each attention layer's query weight
-        self.lora_adaptations = nn.ModuleList([LoRALayer(model_dim, rank) for _ in range(self.config.num_hidden_layers)])
-        
-        # Freeze the pretrained weights if only training the LoRA parameters
-        # for param in self.base_model.parameters():
-        #     param.requires_grad = False
-
-    def forward(self, input_ids, attention_mask=None):
-        outputs = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
-
-        for i, layer in enumerate(self.base_model.encoder.layer):
-            # OG weights
-            original_query_weights = layer.attention.self.query.weight
+#         for i, layer_module in enumerate(self.base_model.encoder.layer):
+#             layer_module_output = layer_module(embeddings, attention_mask=attention_mask)[0]
+#             query, key, value = layer_module_output, layer_module_output, layer_module_output 
             
-            # Apply LoRA adaptation
-            adapted_query_weights = self.lora_adaptations[i](original_query_weights)
+#             adapted_query_weights = self.lora_adaptations[i](layer_module.attention.self.query.weight)
             
-            #TODO: CREATE A CUSTOM ATTENTION MODULE- thats able to accept new query,key, value weights as inputs
-        return outputs
+#             # Apply custom attention using adapted weights
+#             attention_output = self.custom_attention(query, key, value, attention_mask, adapted_query_weights)
+#             embeddings = attention_output  
+        
+        
+#         return embeddings
 

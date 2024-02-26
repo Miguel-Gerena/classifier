@@ -7,12 +7,97 @@ os.environ['HF_DATASETS_CACHE'] = PATH
 os.environ['TORCH_HOME'] = PATH
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
+import torch
+import torch.nn as nn
+from transformers import AutoModel, AutoConfig
+import lora
+
+# device = "cuda" # the device to load the model onto
+
+# model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
+# tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+
+# class CustomizedMistralModel(nn.Module):
+#     def __init__(self, model_name, rank):
+#         super(CustomizedMistralModel, self).__init__()
+#         self.config = AutoConfig.from_pretrained(model_name)
+#         self.base_model = AutoModel.from_pretrained(model_name, config=self.config)
+        
+#         # LoRA layers for each attention layer
+#         self.lora_layers = nn.ModuleList([lora.LoRALayer(self.config.hidden_size, rank) for _ in range(self.config.num_hidden_layers)])
+    
+
+#     def apply_lora(self, layer, lora_layer):
+#         # Apply LoRA to adapt the query weights
+#         with torch.no_grad():
+#             original_query_weights = layer.attention.self.query.weight.data
+#             adapted_query_weights = lora_layer(original_query_weights)
+#             layer.attention.self.query.weight.data = adapted_query_weights
+
+#     def forward(self, input_ids, attention_mask=None):
+#         # Manually apply LoRA to each layer before running forward pass
+#         for layer, lora_layer in zip(self.base_model.encoder.layer, self.lora_layers):
+#             self.apply_lora(layer, lora_layer)
+        
+#         outputs = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        
+#         return outputs
 
 
-device = "cuda" # the device to load the model onto
+class CustomizedMistralModel(nn.Module):
+    def __init__(self, model_name, rank, num_labels, dropout_prob=0.1):
+        super(CustomizedMistralModel, self).__init__()
+        self.config = AutoConfig.from_pretrained(model_name)
+        self.base_model = AutoModel.from_pretrained(model_name, config=self.config)
+        
+        # LoRA layers for each attention layer
+        self.lora_layers = nn.ModuleList([lora.LoRALayer(self.config.hidden_size, rank) for _ in range(self.config.num_hidden_layers)])
+        
+        # Adding a classifier on top of the base model
+        self.classifier = nn.Linear(self.config.hidden_size, num_labels)
+        
+        # Optionally, apply dropout for regularization
+        self.dropout = nn.Dropout(dropout_prob)
+        
+    def apply_lora(self):
+        # Iterate through each MistralDecoderLayer in the base_model's layers
+        for layer, lora_layer in zip(self.base_model.layers, self.lora_layers):
+            # Apply LoRA to adapt the query weights (q_proj) in the self-attention mechanism
+            with torch.no_grad():
+                original_q_proj_weights = layer.self_attn.q_proj.weight.data
+                adapted_q_proj_weights = lora_layer(original_q_proj_weights)
+                layer.self_attn.q_proj.weight.data = adapted_q_proj_weights
 
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
-tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        
+        self.apply_lora()
+
+        outputs = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        pooled_output = outputs.last_hidden_state[:, 0]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+        
+        return SimpleOutput(logits=logits) 
+
+
+
+class SimpleOutput:
+    def __init__(self, logits):
+        self.logits = logits
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

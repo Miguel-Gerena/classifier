@@ -6,7 +6,7 @@ if os.getlogin() == "darke":
     os.environ['TRANSFORMERS_CACHE'] = PATH
     os.environ['HF_HOME'] = PATH
     os.environ['HF_DATASETS_CACHE'] = PATH
-    
+
 import argparse
 import random
 import numpy as np
@@ -15,7 +15,7 @@ from tqdm import tqdm
 import datetime
 import json
 import pandas as pd
-
+import lora, mistal7b
 
 # wandb
 try:
@@ -148,7 +148,11 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                     tokenizer.pad_token = tokenizer.eos_token
                 tokenizer.max_length = max_length
                 tokenizer.model_max_length = max_length
-                model = AutoModelForSequenceClassification.from_config(config=config)
+                if model_name == 'mistralai/Mistral-7B-v0.1':
+                    rank = 64
+                    model = mistal7b.CustomizedMistralModel(model_name=model_name, rank=rank, num_labels=CLASSES)
+                else:
+                    model = AutoModelForSequenceClassification.from_config(config=config)
             elif model_name in ['lstm', 'cnn', 'big_cnn', 'naive_bayes', 'logistic_regression']:
                 # Word-level tokenizer
                 tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
@@ -369,6 +373,10 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     # Best validation set accuracy so far.
     best_val_acc = 0
     best_f1 = 0
+
+    accumulation_steps = args.accumulation_steps
+
+
     # validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=0)
     # validation(args,data_loaders[1], model, criterion, device, name='validation', tensorboard_writer=tensorboard_writer, step=0)
     for epoch in range(epoch_n):
@@ -384,8 +392,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 outputs = model(input_ids=inputs)
             else:
                 outputs = model(input_ids=inputs, labels=decisions).logits
-            loss = criterion(outputs, decisions) #outputs.logits
-            total_train_loss += loss.cpu().item()
+            loss = criterion(outputs, decisions) / accumulation_steps
+            total_train_loss += loss.cpu().item() * accumulation_steps
 
             # Backward pass
             loss.backward()
@@ -399,7 +407,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 wandb.log({'Training Loss': loss})
             
             if args.tensorboard:
-                tensorboard_writer.add_scalar('train/loss', loss.item(), epoch * len(data_loaders[0]) + i)
+                tensorboard_writer.add_scalar('train/loss', loss.item() * accumulation_steps, epoch * len(data_loaders[0]) + i)
                 tensorboard_writer.add_scalar('train/mean_loss', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
 
 
@@ -566,9 +574,10 @@ if __name__ == '__main__':
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
+    parser.add_argument('--accumulation_steps', default=100, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
-    parser.add_argument('--batch_size', type=dict, default={'train':16, 'validation':48}, help='Batch size.')
+    parser.add_argument('--batch_size', type=dict, default={'train':2, 'validation':4}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
