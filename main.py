@@ -39,6 +39,7 @@ from transformers import RobertaForSequenceClassification, RobertaTokenizer, Rob
 from transformers import GPT2ForSequenceClassification, GPT2Tokenizer, GPT2Config
 from transformers import LongformerForSequenceClassification, LongformerTokenizer, LongformerConfig
 from transformers import PreTrainedTokenizerFast
+from transformers import BitsAndBytesConfig
 
 
 # Import the sklearn Multinomial Naive Bayes
@@ -100,15 +101,26 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 config = DistilBertConfig(num_labels=CLASSES, output_hidden_states=False) 
                 tokenizer = DistilBertTokenizer.from_pretrained(model_name, do_lower_case=True)
                 model = DistilBertForSequenceClassification(config=config)
-            # This step is actually important.
-            tokenizer.max_length = max_length
-            tokenizer.model_max_length = max_length
+  
         elif model_name == 'mistralai/Mistral-7B-v0.1':
             config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
             model = AutoModelForSequenceClassification.from_config(config)
             tokenizer = AutoTokenizer.from_pretrained(model_name)
+        elif model_name == "google/gemma-2b":
+            with open("./.env") as file:
+                for line in file:
+                    token = line
+            quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+            config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False, token=token, quantization_config=quantization_config, device_map="auto")
+            model = AutoModelForSequenceClassification.from_config(config)
+            tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+
         else:
             raise NotImplementedError
+        # This step is actually important.
+        tokenizer.max_length = max_length
+        tokenizer.model_max_length = max_length
     else:
         # Train from scratch
         if train_from_scratch:
@@ -141,10 +153,10 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
 
         # Finetune
         else:
-            if model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
+            if model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
                 config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                if model_name == 'gpt2' or model_name == 'mistralai/Mistral-7B-v0.1':
+                if model_name in ['gpt2', 'mistralai/Mistral-7B-v0.1', "google/gemma-7b", "google/gemma-2b"]:
                     tokenizer.pad_token = tokenizer.eos_token
                 tokenizer.max_length = max_length
                 tokenizer.model_max_length = max_length
@@ -201,7 +213,7 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             else:
                 raise NotImplementedError()
             
-    if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
+    if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
         print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
     else:
         print(model)
@@ -238,6 +250,12 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             
             if section == "examiner":
                 dataset = dataset.map(combine, num_proc=args.num_proc)
+
+            cols_keep = [section, "output", "decision"]
+
+            for col in dataset.column_names:
+                if col not in cols_keep:
+                    dataset = dataset.remove_columns(col)
             
 
             dataset = dataset.map(
@@ -374,6 +392,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
+        k = 0
+        loss = 0
         for i, batch in enumerate(tqdm(data_loaders[0])):
             inputs, decisions = batch['input_ids'], batch['output']
             inputs = inputs.to(device, non_blocking=True)
@@ -384,15 +404,18 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 outputs = model(input_ids=inputs)
             else:
                 outputs = model(input_ids=inputs, labels=decisions).logits
-            loss = criterion(outputs, decisions) #outputs.logits
+            loss += criterion(outputs, decisions) #outputs.logits
             total_train_loss += loss.cpu().item()
 
             # Backward pass
-            loss.backward()
-            optim.step()
-            if scheduler:
-                scheduler.step()
-            optim.zero_grad()
+            if k !=0 and k % 16 == 0:
+                loss.backward()
+                optim.step()
+                if scheduler:
+                    scheduler.step()
+                optim.zero_grad()
+                k = 0
+                loss = 0
             
             # wandb (optional)
             if args.wandb:
@@ -545,20 +568,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
     # parser.add_argument('--cache_dir', default='/mnt/data/HUPD/cache', type=str, help='Cache directory.')
     # parser.add_argument('--data_dir', default='"https://huggingface.co/datasets/HUPD/hupd/blob/main/hupd_metadata_jan16_2022-02-22.feather', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
-    parser.add_argument('--section', type=str, default='abstract', help='Patent application section of interest.')
+    parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
     parser.add_argument('--train_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
     parser.add_argument('--train_filing_end_date', type=str, default='', help='End date for filtering the training data.')
     parser.add_argument('--val_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
     parser.add_argument('--val_filing_end_date', type=str, default='', help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
-    parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
     parser.add_argument('--use_wsampler', action='store_true', help='Use a weighted sampler (for the training set).')
     parser.add_argument('--val_set_balancer', action='store_true', help='Use a balanced set for validation? That is, do you want the same number of classes of examples in the validation set.')
     parser.add_argument('--uniform_split', default=True, help='Uniformly split the data into training and validation sets.')
@@ -568,8 +590,8 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
-    parser.add_argument('--batch_size', type=dict, default={'train':16, 'validation':48}, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
+    parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
+    parser.add_argument('--epoch_n', type=int, default=5, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
@@ -588,10 +610,10 @@ if __name__ == '__main__':
     parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
 
-    mistral_model_name = "mistralai/Mistral-7B-v0.1"
+    mistral_model_name = "google/gemma-2b"
     # Model related params
-    model_path = "./CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/"
-    parser.add_argument('--model_name', type=str, default="distilbert-base-uncased", help='Name of the model.')
+    model_path = ""
+    parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -604,6 +626,9 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float, default=0.25, help='Use dropout for the CNN model (if applicable)')
     parser.add_argument('--naive_bayes_version', type=str, default='Bernoulli', help='Type of the Naive Bayes classifer (if applicable).')
     parser.add_argument('--alpha_smooth_val', type=float, default=1.0, help='Alpha smoothing value for the Naive Bayes classifier (if applicable).')
+
+    parser.add_argument('--max_length', type=int, default=8192, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
+
     
     # Parse args
     args = parser.parse_args()
@@ -635,9 +660,9 @@ if __name__ == '__main__':
             filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
 
-    write_file = ""
     if args.validation:
         write_file = ""
+        args.dataset_name = "sample"
         args.tensorboard = None
         args.uniform_split = False
         args.val_set_balancer = True

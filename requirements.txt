@@ -4,10 +4,13 @@ accelerate
 scikit-learn
 torcheval
 tensorboard
+flash-attn
 
 --find-links https://download.pytorch.org/whl/cu121
 
 torch==2.2.0+cu121
+
+#  pip install -q -U git+https://github.com/huggingface/transformers.git
 
 # pip install torch --index-url https://download.pytorch.org/whl/cu121
 
