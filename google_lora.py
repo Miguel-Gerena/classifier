@@ -4,6 +4,8 @@ from typing import Optional
 import torch
 
 from transformers import AutoTokenizer, HfArgumentParser, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments
+from transformers import AutoModelForSequenceClassification, AutoConfig
+
 from datasets import load_dataset
 from peft import LoraConfig
 from trl import SFTTrainer
@@ -74,9 +76,6 @@ parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
 
-def formatting_func(example):
-    text = f"### USER: {example['data'][0]}\n### ASSISTANT: {example['data'][1]}"
-    return text
 
 # Load the GG model - this is the local one, update it to the one on the Hub
 model_id = "google/gemma-7b"
@@ -86,10 +85,12 @@ quantization_config = BitsAndBytesConfig(
     bnb_4bit_compute_dtype=torch.float16,
     bnb_4bit_quant_type="nf4"
 )
-
+CLASSES = 2
 # Load model
-model = AutoModelForCausalLM.from_pretrained(
+model = AutoModelForSequenceClassification.from_pretrained(
     model_id, 
+    num_labels=CLASSES, 
+    output_hidden_states=False,
     quantization_config=quantization_config, 
     torch_dtype=torch.float32,
     attn_implementation="sdpa" if not script_args.use_flash_attention_2 else "flash_attention_2"
@@ -103,7 +104,7 @@ lora_config = LoraConfig(
     r=script_args.lora_r,
     target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
     bias="none",
-    task_type="CAUSAL_LM",  # TaskType.SEQ_CLS,
+    task_type="SEQ_CLS",
     lora_alpha=script_args.lora_alpha,
     lora_dropout=script_args.lora_dropout
 )
@@ -178,10 +179,9 @@ trainer = SFTTrainer(
     eval_dataset=data_loaders[1],
     peft_config=lora_config,
     packing=script_args.packing,
-    dataset_text_field="id",
+    dataset_text_field=args.section,
     tokenizer=tokenizer,
     max_seq_length=script_args.max_seq_length,
-    formatting_func=formatting_func,
 )
 
 trainer.train()

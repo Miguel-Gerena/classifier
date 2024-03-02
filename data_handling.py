@@ -1,4 +1,10 @@
 
+import os
+if os.getlogin() == "darke":
+    PATH =  "D:/classes/cache/huggingface/hub"
+    os.environ['HF_HOME'] = PATH
+    os.environ['HF_DATASETS_CACHE'] = PATH
+
 import torch
 import random
 import numpy as np
@@ -35,7 +41,7 @@ from tokenizers.trainers import WordLevelTrainer
 # Confusion matrix
 from sklearn.metrics import confusion_matrix, f1_score
 
-import lora, mistal7b
+# import lora, mistal7b
 
 # wandb
 try:

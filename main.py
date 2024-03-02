@@ -257,7 +257,6 @@ if __name__ == '__main__':
     parser.add_argument('--val_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
     parser.add_argument('--val_filing_end_date', type=str, default='', help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
-    parser.add_argument('--min_frequency', type=int, default=3, help='The minimum frequency that a token/word needs to have in order to appear in the vocabulary.')
     parser.add_argument('--use_wsampler', action='store_true', help='Use a weighted sampler (for the training set).')
     parser.add_argument('--val_set_balancer', action='store_true', help='Use a balanced set for validation? That is, do you want the same number of classes of examples in the validation set.')
     parser.add_argument('--uniform_split', default=True, help='Uniformly split the data into training and validation sets.')
@@ -267,46 +266,34 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--accumulation_steps', default=0, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=dict, default={'train':8, 'validation':48}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
-    parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb project name.')
-    parser.add_argument('--pos_class_weight', type=float, default=0, help='The class weight of the rejected class label (it is 0 by default).')
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
     parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
     parser.add_argument('--continue_training', type=bool, default=True, help='Load weights and continue training')
     parser.add_argument('--linear_probe', type=bool, default=False, help='Load weights and continue training')
 
-
-    
     # Saving purposes
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
-    parser.add_argument('--np_filename', type=str, default=None, help='Name of the numpy file to be saved.')
     
 
     mistral_model_name = "distilbert-base-uncased"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_False_all_True_date_3_1_hr_21/f1_"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_True_all_False_date_3_2_hr_8/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
-    parser.add_argument('--embed_dim', type=int, default=200, help='Embedding dimension of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
     parser.add_argument('--save_path', type=str, default="CS224N_models", help='The path where the model is going to be saved.')
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
-    parser.add_argument('--n_filters', type=int, default=25, help='Number of filters in the CNN (if applicable)')
-    parser.add_argument('--filter_sizes', type=int, nargs='+', action='append', default=[[3,4,5], [5,6,7], [7,9,11]], help='Filter sizes for the CNN (if applicable).')
-    parser.add_argument('--dropout', type=float, default=0.25, help='Use dropout for the CNN model (if applicable)')
-    parser.add_argument('--naive_bayes_version', type=str, default='Bernoulli', help='Type of the Naive Bayes classifer (if applicable).')
-    parser.add_argument('--alpha_smooth_val', type=float, default=1.0, help='Alpha smoothing value for the Naive Bayes classifier (if applicable).')
-
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
 
     
@@ -324,7 +311,7 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.embed_dim}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -334,10 +321,7 @@ if __name__ == '__main__':
     
     filename = args.filename
     if filename is None:
-        if args.model_name == 'naive_bayes':
-            filename = f'{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
-        else:
-            filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
+        filename = f'{cat_label}_{args.section}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
 
     if args.validation:
@@ -390,10 +374,7 @@ if __name__ == '__main__':
         train_from_scratch = args.train_from_scratch, 
         model_name = args.model_name, 
         dataset = dataset_dict,
-        section = args.section,
         vocab_size = args.vocab_size,
-        embed_dim = args.embed_dim,
-        n_classes = CLASSES,
         max_length=args.max_length
         )
 
