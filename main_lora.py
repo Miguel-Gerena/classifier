@@ -8,10 +8,8 @@ if os.getlogin() == "darke":
 import argparse
 import random
 import numpy as np
-from tqdm import tqdm
 import datetime
 import json
-import pandas as pd
 # import lora, mistal7b
 
 # wandb
@@ -31,10 +29,8 @@ from datasets import load_dataset
 # For scheduling 
 from transformers import get_linear_schedule_with_warmup
 
-#additional metrics
-from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
 
-from data_handling import map_decision_to_string, create_model_and_tokenizer, dataset_statistics, measure_accuracy, create_dataset
+from data_handling import map_decision_to_string, create_model_and_tokenizer, dataset_statistics, create_dataset
 
 # For filtering out CONT-apps and pending apps
 RANDOM_SEED = 1729
@@ -46,206 +42,9 @@ random.seed(RANDOM_SEED)
 CLASSES = 2
 CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
-# Evaluation procedure (for the neural models)
-def validation(args, val_loader, model, criterion, device, name='validation', write_file=None, tensorboard_writer=None, step = 0, use_torch_metrics=True):
-    if name=="train":
-        val_loader = DataLoader(val_loader, batch_size=args.batch_size["validation"])
-    model.eval()
-    total_loss = 0.
-    total_correct = 0
-    total_sample = 0
-    total_confusion = np.zeros((CLASSES, CLASSES))
-
-    if use_torch_metrics:
-        torch_metrics = {}
-        torch_metrics["acc"] = BinaryAccuracy()
-        torch_metrics["f1"] = BinaryF1Score()
-        torch_metrics["auc"] = BinaryAUPRC()
-
-        # Loop over the examples in the evaluation set
-    for i, batch in enumerate(tqdm(val_loader)):
-        inputs, decisions = batch['input_ids'], batch['output']
-        inputs = inputs.to(device)
-        decisions = decisions.to(device)
-        with torch.no_grad():
-            if args.model_name in ['lstm', 'cnn', 'big_cnn', 'naive_bayes', 'logistic_regression']:
-                outputs = model(input_ids=inputs)
-            else:
-                outputs = model(input_ids=inputs, labels=decisions).logits
-        loss = criterion(outputs, decisions) 
-        logits = outputs 
-        total_loss += loss.cpu().item()
-
-        preds = torch.argmax(logits, axis=1).flatten()
-        labels = decisions.flatten()
-
-        correct_n, sample_n, c_matrix, f1 = measure_accuracy(preds.cpu().numpy(), labels.cpu().numpy())
-        total_confusion += c_matrix
-        total_correct += correct_n
-        total_sample += sample_n
-
-        torch_metrics["acc"] = torch_metrics["acc"].update(preds, labels)
-        torch_metrics["f1"] = torch_metrics["acc"].update(preds, labels)
-        torch_metrics["auc"] = torch_metrics["acc"].update(preds, labels)
-
-    mean_loss = total_loss/total_sample
-    acc = total_correct/total_sample
-    total_f1 = torch_metrics["f1"].compute()
-
-    # Print the performance of the model on the validation set 
-    print(f'*** Accuracy on the {name} set: {acc}')
-    print(f'*** F1 on the {name} set: {total_f1}')
-    print(f'*** Confusion matrix:\n{total_confusion}')
-
-    if args.tensorboard:
-        tensorboard_writer.add_scalar(f'val/{name}_mean_loss', mean_loss, step)
-        tensorboard_writer.add_scalar(f'val/{name}_acc', acc, step)   
-
-        tensorboard_writer.add_scalar(f'val/{name}_torch_acc', torch_metrics["acc"].compute(), step)   
-        tensorboard_writer.add_scalar(f'val/{name}_torch_f1', total_f1, step)   
-        tensorboard_writer.add_scalar(f'val/{name}_torch_auc', torch_metrics["auc"].compute(), step)   
-
-
-    if write_file:
-        write_file.write(f'*** Accuracy on the {name} set: {total_correct/total_sample}\n')
-        write_file.write(f'*** F1 on the {name} set: {total_f1}\n')
-        write_file.write(f'*** Confusion matrix:\n{total_confusion}\n')
-        write_file.flush()
-    
-    if name=="train":
-        del val_loader
-    return mean_loss, float(acc) * 100., total_f1
-
-
-# Training procedure (for the neural models)
-def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file=None, tensorboard_writer=None):
-    print('\n>>>Training starts...')
-    if write_file:
-        write_file.write('\n>>>Training starts...\n')
-    # Training mode is on
-    model.train()
-    # Best validation set accuracy so far.
-    best_val_acc = 0
-    best_f1 = 0
-
-
-    for epoch in range(epoch_n):
-        total_train_loss = 0.
-        # Loop over the examples in the training set.
-        k = 0
-        # loss = torch.tensor(0, requires_grad=True)
-        for i, batch in enumerate(tqdm(data_loaders[0])):
-            inputs, decisions = batch['input_ids'], batch['output']
-            inputs = inputs.to(device, non_blocking=True)
-            decisions = decisions.to(device, non_blocking=True)
-            
-            # Forward pass
-            if args.model_name in ['lstm', 'cnn', 'big_cnn', 'logistic_regression']:
-                outputs = model(input_ids=inputs)
-            else:
-                outputs = model(input_ids=inputs, labels=decisions).logits
-            #outputs.logits
-
-            # Backward pass
-            if args.accumulation_steps:
-                loss += criterion(outputs, decisions) 
-                if k !=0 and k % args.accumulation_steps == 0:
-                    loss.backward()
-                    optim.step()
-                    if scheduler:
-                        scheduler.step()
-                    optim.zero_grad()
-                    k = 0
-                    loss = 0
-            else:
-                loss = criterion(outputs, decisions) 
-                optim.zero_grad()
-                loss.backward()
-                optim.step()
-                if scheduler:
-                    scheduler.step()
-            
-            total_train_loss += loss.cpu().item()
-            # wandb (optional)
-            if args.wandb:
-                wandb.log({'Training Loss': loss})
-            
-            if args.tensorboard:
-                tensorboard_writer.add_scalar('train/loss', loss.item(), epoch * len(data_loaders[0]) + i)
-                tensorboard_writer.add_scalar('train/mean_loss', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
-
-
-            # Print the loss every val_every step
-            if (epoch * len(data_loaders[0]) + i) % args.val_every == 0 and i !=0:
-                print(f'*** Loss: {loss}')
-                print(f'*** Input: {convert_ids_to_string(tokenizer, inputs[0])}')
-                if write_file:
-                    write_file.write(f'\nEpoch: {epoch}, Step: {i}\n')
-                # Get the performance of the model on the validation set
-                mean_loss, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-                model.train()
-
-                if args.wandb:
-                    wandb.log({'Validation Accuracy': val_acc})
-
-                if best_val_acc < val_acc:
-                    best_val_acc = val_acc
-                    # Save the model if a save directory is specified
-                    if args.save_path:
-                        # If the model is a Transformer architecture, make sure to save the tokenizer as well
-                        if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
-                            model.save_pretrained(args.save_path + 'model')
-                            tokenizer.save_pretrained(args.save_path + 'tokenizer')
-                        else:
-                            torch.save(model.state_dict(), args.save_path)
-    
-        if args.save_path:
-            # If the model is a Transformer architecture, make sure to save the tokenizer as well
-            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
-                model.save_pretrained(args.save_path + 'epoch_model')
-                tokenizer.save_pretrained(args.save_path + 'epoch_tokenizer')
-            else:
-                torch.save(model.state_dict(), args.save_path) 
-        # if (epoch * len(data_loaders[0]) + i) % args.validate_training_every_epoch == 0 and i !=0:
-        #     validation(args, data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-
-    # Training is complete!
-    print(f'\n ~ The End ~')
-    if write_file:
-        write_file.write('\n ~ The End ~\n')
-    
-    # Final evaluation on the validation set
-    _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-    if best_val_acc < val_acc:
-        best_val_acc = val_acc
-        
-        # Save the best model so far
-        if args.save_path:
-            if args.model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1']:
-                model.save_pretrained(args.save_path + 'model')
-            else:
-                torch.save(model.state_dict(), args.save_path)
-
-    
-    
-    # Additionally, print the performance of the model on the training set if we were not doing only inference
-    if not args.validation:
-        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-    
-    # Print the highest accuracy score obtained by the model on the validation set
-    print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
-    print(f'*** Highest f1 accuract on the validation set: {best_f1}.')
-
-    if write_file:
-        write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
-        write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
-
-
-if __name__ == '__main__':
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
+def main():
     parser = argparse.ArgumentParser()
-    
+
     # Dataset
     parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
@@ -309,7 +108,6 @@ if __name__ == '__main__':
 
     parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
 
-    
     # Parse args
     args = parser.parse_args()
     epoch_n = args.epoch_n
@@ -334,10 +132,7 @@ if __name__ == '__main__':
     
     filename = args.filename
     if filename is None:
-        if args.model_name == 'naive_bayes':
-            filename = f'{args.naive_bayes_version}/{cat_label}_{args.section}.txt'
-        else:
-            filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
+        filename = f'{cat_label}_{args.section}_embdim{args.embed_dim}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
 
     if args.validation:
@@ -363,8 +158,6 @@ if __name__ == '__main__':
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
     
     # Make the batch size 1 when using an NB classifier
-    if args.model_name == 'naive_bayes':
-        args.batch_size = 1
 
     # Load the dataset dictionary
     dataset_dict = load_dataset(args.dataset_load_path , 
@@ -408,9 +201,6 @@ if __name__ == '__main__':
         write_file.write(f'*** Vocabulary: {args.vocab_size}\n')
         write_file.write(f'*** args: {args}\n\n')
 
-    # GPU specifications 
-    if args.model_name != 'naive_bayes':
-        model.to(device)
 
     # Load the dataset
     data_loaders = create_dataset(
@@ -428,12 +218,15 @@ if __name__ == '__main__':
         train_label_stats = dataset_statistics( data_loaders[0])
         print(f'*** Training set label statistics: {train_label_stats}')
 
+
     val_label_stats = dataset_statistics( data_loaders[1])
     print(f'*** Validation set label statistics: {val_label_stats}')
     # print(f'*** Training set longest {args.section}: {longest_train_section}')
     # print(f'*** Training set longest {args.section}: {longest_val_section}')
     # write_file.write(f'*** Training set longest {args.section}: {longest_train_section}')
     # write_file.write(f'*** Training set longest {args.section}: {longest_val_section}')
+
+
 
     if write_file:
         write_file.write(f'*** Training set label statistics: {train_label_stats}\n')
