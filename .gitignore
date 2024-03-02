@@ -6,3 +6,4 @@ tensorboard
 *.gz
 *.feather
 *.pyc
+*.env
