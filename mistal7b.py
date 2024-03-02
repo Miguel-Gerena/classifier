@@ -40,11 +40,17 @@ class CustomizedMistralModel(nn.Module):
             # Apply LoRA to adapt the query weights (q_proj) in the self-attention mechanism
             with torch.no_grad():
                 original_q_proj_weights = layer.self_attn.q_proj.weight.data
+
+                # print("OG WEIGHTS:", original_q_proj_weights)
+
                 adapted_q_proj_weights = lora_layer(original_q_proj_weights)
                 layer.self_attn.q_proj.weight.data = adapted_q_proj_weights
+                # print("ADAPTED WEIGHTS", adapted_q_proj_weights)
+                # exit()
 
 
     def forward(self, input_ids, attention_mask=None, labels=None):
+
         
         self.apply_lora()
 
