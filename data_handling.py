@@ -59,8 +59,7 @@ CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
 # Create model and tokenizer
 def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased',
-                             dataset=None, section='abstract', vocab_size=10000, embed_dim=200, n_classes=CLASSES, max_length=512):
-    special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
+                             dataset=None,  vocab_size=10000, max_length=512):
 
     if args.validation or args.continue_training:
         if model_name == 'distilbert-base-uncased':
@@ -128,65 +127,12 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                     model = mistal7b.CustomizedMistralModel(model_name=model_name, rank=rank, num_labels=CLASSES)
                 else:
                     model = AutoModelForSequenceClassification.from_config(config=config)
-            elif model_name in ['lstm', 'cnn', 'big_cnn', 'naive_bayes', 'logistic_regression']:
-                # Word-level tokenizer
-                tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
-                # Normalizers
-                tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
-                # World-level trainer
-                trainer = WordLevelTrainer(vocab_size=vocab_size, min_frequency=3, show_progress=True, 
-                    special_tokens=special_tokens)
-                # Whitespace (pre-tokenizer)
-                tokenizer.pre_tokenizer = Whitespace()
-                # Train from iterator
-                tokenizer.train_from_iterator(dataset['train'][section], trainer=trainer)                
-                # Update the vocab size
-                vocab_size = tokenizer.get_vocab_size()
-                # [PAD] idx
-                pad_idx = tokenizer.encode('[PAD]').ids[0]
-
-                # Currently the call method for WordLevelTokenizer is not working.
-                # Using this temporary method until the tokenizers library is updated.
-                # Not a fan of this method, but this is the best we have right now (sad face).
-                # Based on https://github.com/huggingface/transformers/issues/7234#issuecomment-720092292
-                tokenizer.enable_padding(pad_type_id=pad_idx)
-                tokenizer.pad_token = '[PAD]'
-                args.vocab_size = vocab_size
-
-                if args.model_name != 'naive_bayes': # CHANGE 'naive_bayes' (shannon)
-                    tokenizer.model_max_length = max_length
-                    tokenizer.max_length = max_length
-                tokenizer.save("temp_tokenizer.json") 
-                if args.tokenizer_save_path:
-                    print('*** Saving the tokenizer...')
-                    tokenizer.save(f"{args.tokenizer_save_path}")
-                tokenizer = PreTrainedTokenizerFast(tokenizer_file="temp_tokenizer.json")
-
-                if args.model_name != 'naive_bayes': # CHANGE 'naive_bayes'
-                    tokenizer.model_max_length = max_length
-                    tokenizer.max_length = max_length
-                    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-                    tokenizer.pad_token = '[PAD]'
-                    tokenizer.add_special_tokens({'sep_token': '[SEP]'})
-                    tokenizer.sep_token = '[SEP]'
-
-                model = None
-                if model_name == 'logistic_regression':
-                    model = LogisticRegression(vocab_size=vocab_size, embed_dim=embed_dim, n_classes=n_classes, pad_idx=pad_idx)
-                elif model_name == 'cnn':
-                    model = BasicCNNModel(vocab_size=vocab_size, embed_dim=embed_dim, pad_idx=pad_idx, n_classes=n_classes, n_filters=args.n_filters, filter_sizes=args.filter_sizes[0], dropout=args.dropout)
-                elif model_name == 'big_cnn':
-                    model = BigCNNModel(vocab_size=vocab_size, embed_dim=embed_dim, pad_idx=pad_idx, n_classes=n_classes, n_filters=args.n_filters, filter_sizes=args.filter_sizes, dropout=args.dropout)
-            else:
-                raise NotImplementedError()
             
     if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
         print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
     else:
         print(model)
     return tokenizer, dataset, model, vocab_size
-
-
 
 
 # Map decision2string
