@@ -279,6 +279,7 @@ if __name__ == '__main__':
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
     parser.add_argument('--continue_training', type=bool, default=True, help='Load weights and continue training')
     parser.add_argument('--linear_probe', type=bool, default=False, help='Load weights and continue training')
+    parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
 
     # Saving purposes
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
@@ -431,6 +432,7 @@ if __name__ == '__main__':
     # Loss function 
     # torch.nn.BCEWithLogitsLoss  #investigate binary loss
     # if len(CLASS_NAMES)> 2:
+    class_weights = None
     if args.handle_skew_data and not args.validation:
         total_examples = sum(train_label_stats.values())
         class_weights = torch.tensor([(train_label_stats[class_decision])/total_examples for class_decision in CLASS_NAMES]).to(device) # this should help with skewed data.  
