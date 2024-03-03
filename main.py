@@ -72,7 +72,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         with torch.no_grad():
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
         logits = outputs.logits
-        loss = criterion(logits, decisions)
+        loss = outputs.loss
         total_loss += loss.cpu().item()
 
         preds = torch.argmax(logits, axis=1).flatten()
@@ -141,7 +141,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
 
             
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
-            loss = criterion(outputs.logits, decisions)
+            loss = outputs.loss
 
             # Backward pass
             if args.accumulation_steps:
@@ -239,7 +239,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
@@ -279,7 +279,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "distilbert-base-uncased"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_True_all_False_date_3_2_hr_8/"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_2_hr_22/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')

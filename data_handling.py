@@ -188,9 +188,12 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             # Set the dataset format
             dataset.set_format(type='torch', 
                 columns=['input_ids', 'attention_mask', 'labels'])
-
-            data_loaders.append(dataset)
-    return [DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')) for dataset in data_loaders] if return_data_loader else data_loaders
+            
+            if return_data_loader:
+                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')))
+            else:
+                data_loaders.append(dataset)
+    return data_loaders
 
 
 # Return label statistics of the dataset loader
