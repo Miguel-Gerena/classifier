@@ -242,7 +242,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
@@ -362,8 +362,7 @@ if __name__ == '__main__':
     for name in ['train', 'validation']:
         dataset_dict[name] = dataset_dict[name].map(map_decision_to_string, num_proc=args.num_proc)
         # Remove the pending and CONT-patent applications
-        dataset_dict[name] = dataset_dict[name].filter(lambda e: e['output'] <= 1)
-        dataset_dict[name] = dataset_dict[name].rename_column("output", "labels")
+        dataset_dict[name] = dataset_dict[name].filter(lambda e: e['labels'] <= 1)
         dataset_dict[name] = dataset_dict[name].remove_columns(set(dataset_dict[name].column_names) - set(["labels", args.section]))
 
     
