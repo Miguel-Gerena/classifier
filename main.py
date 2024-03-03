@@ -64,16 +64,11 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
         # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
-        inputs, decisions = batch['input_ids'], batch['labels']
-        inputs = inputs.to(device)
-        decisions = decisions.to(device)
+        decisions = batch['labels'].to(device)
         with torch.no_grad():
-            if args.model_name in ['lstm', 'cnn', 'big_cnn', 'naive_bayes', 'logistic_regression']:
-                outputs = model(input_ids=inputs)
-            else:
-                outputs = model(input_ids=inputs, labels=decisions).logits
-        loss = criterion(outputs, decisions) 
-        logits = outputs 
+            outputs = model(**batch)
+        loss = outputs.loss
+        logits = outputs.logits
         total_loss += loss.cpu().item()
 
         preds = torch.argmax(logits, axis=1).flatten()
