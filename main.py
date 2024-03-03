@@ -64,7 +64,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
         # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
-        inputs, decisions = batch['input_ids'], batch['output']
+        inputs, decisions = batch['input_ids'], batch['labels']
         inputs = inputs.to(device)
         decisions = decisions.to(device)
         with torch.no_grad():
@@ -135,20 +135,15 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         k = 0
         # loss = torch.tensor(0, requires_grad=True)
         for i, batch in enumerate(tqdm(data_loaders[0])):
-            inputs, decisions = batch['input_ids'], batch['output']
+            inputs, decisions = batch['input_ids'], batch['labels']
             inputs = inputs.to(device, non_blocking=True)
             decisions = decisions.to(device, non_blocking=True)
             
-            # Forward pass
-            if args.model_name in ['lstm', 'cnn', 'big_cnn', 'logistic_regression']:
-                outputs = model(input_ids=inputs)
-            else:
-                outputs = model(input_ids=inputs, labels=decisions).logits
-            #outputs.logits
+            outputs = model(input_ids=inputs, labels=decisions)
 
             # Backward pass
             if args.accumulation_steps:
-                loss += criterion(outputs, decisions) 
+                loss += outputs.loss
                 if k !=0 and k % args.accumulation_steps == 0:
                     loss.backward()
                     optim.step()
@@ -158,7 +153,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                     k = 0
                     loss = 0
             else:
-                loss = criterion(outputs, decisions) 
+                loss = outputs.loss
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
@@ -216,6 +211,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     
     # Final evaluation on the validation set
     _, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, name='validation', write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
+    best_f1 = max(best_f1, f1_acc)
     if best_val_acc < val_acc:
         best_val_acc = val_acc
         
@@ -227,11 +223,6 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 torch.save(model.state_dict(), args.save_path)
 
     
-    
-    # Additionally, print the performance of the model on the training set if we were not doing only inference
-    if not args.validation:
-        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-    
     # Print the highest accuracy score obtained by the model on the validation set
     print(f'*** Highest accuracy on the validation set: {best_val_acc}.')
     print(f'*** Highest f1 accuract on the validation set: {best_f1}.')
@@ -239,6 +230,10 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     if write_file:
         write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
         write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
+    
+    # Additionally, print the performance of the model on the training set if we were not doing only inference
+    if not args.validation:
+        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
 
 
 if __name__ == '__main__':
@@ -247,7 +242,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
@@ -266,7 +261,7 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--accumulation_steps', default=0, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=dict, default={'train':8, 'validation':48}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
@@ -277,7 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
     parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
-    parser.add_argument('--continue_training', type=bool, default=True, help='Load weights and continue training')
+    parser.add_argument('--continue_training', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--linear_probe', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
 
@@ -287,7 +282,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "distilbert-base-uncased"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_True_all_False_date_3_2_hr_8/epoch_"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_True_all_False_date_3_2_hr_8/"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -368,6 +363,9 @@ if __name__ == '__main__':
         dataset_dict[name] = dataset_dict[name].map(map_decision_to_string, num_proc=args.num_proc)
         # Remove the pending and CONT-patent applications
         dataset_dict[name] = dataset_dict[name].filter(lambda e: e['output'] <= 1)
+        dataset_dict[name] = dataset_dict[name].rename_column("output", "labels")
+        dataset_dict[name] = dataset_dict[name].remove_columns(set(dataset_dict[name].column_names) - set(["labels", args.section]))
+
     
     # Create a model and an appropriate tokenizer
     tokenizer, dataset_dict, model, vocab_size = create_model_and_tokenizer(
@@ -400,8 +398,6 @@ if __name__ == '__main__':
         dataset_dict = dataset_dict, 
         tokenizer = tokenizer, 
         section = args.section,
-        use_wsampler=args.use_wsampler,
-        write_file=write_file
         )
     del dataset_dict
 
