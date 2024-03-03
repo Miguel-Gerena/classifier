@@ -266,7 +266,7 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--accumulation_steps', default=0, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=dict, default={'train':8, 'validation':48}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
@@ -331,10 +331,20 @@ if __name__ == '__main__':
         args.tensorboard = None
         args.uniform_split = False
         args.val_set_balancer = True
-        args.train_filing_start_date = '2018-01-01'
-        args.train_filing_end_date = '2018-01-21'
-        args.val_filing_start_date = '2018-01-01'
-        args.val_filing_end_date = '2018-01-31'
+        args.train_filing_start_date = '2017-01-01'
+        args.train_filing_end_date = '2017-01-21'
+        args.val_filing_start_date = '2017-01-01'
+        args.val_filing_end_date = '2017-01-31'
+    # if args.validation:
+    #     write_file = ""
+    #     args.dataset_name = "sample"
+    #     args.tensorboard = None
+    #     args.uniform_split = False
+    #     args.val_set_balancer = True
+    #     args.train_filing_start_date = '2016-01-01'
+    #     args.train_filing_end_date = '2016-01-21'
+    #     args.val_filing_start_date = '2016-01-01'
+    #     args.val_filing_end_date = '2016-01-31'
 
     else:
         write_file = open(args.filename, "w")
