@@ -40,11 +40,17 @@ class CustomizedMistralModel(nn.Module):
             # Apply LoRA to adapt the query weights (q_proj) in the self-attention mechanism
             with torch.no_grad():
                 original_q_proj_weights = layer.self_attn.q_proj.weight.data
+
+                # print("OG WEIGHTS:", original_q_proj_weights)
+
                 adapted_q_proj_weights = lora_layer(original_q_proj_weights)
                 layer.self_attn.q_proj.weight.data = adapted_q_proj_weights
+                # print("ADAPTED WEIGHTS", adapted_q_proj_weights)
+                # exit()
 
 
     def forward(self, input_ids, attention_mask=None, labels=None):
+
         
         self.apply_lora()
 
@@ -73,14 +79,19 @@ class SimpleOutput:
 
 # tokenizer = AutoTokenizer.from_pretrained("google/gemma-7b")
 # model = AutoModelForCausalLM.from_pretrained("google/gemma-7b", device_map="auto", torch_dtype=torch.float16)
-with open("./.env") as file:
-    for line in file:
-       token = line
-model_name = "google/gemma-7b"
-config = AutoConfig.from_pretrained(model_name, num_labels=2, output_hidden_states=False, token=token)
-model = AutoModelForSequenceClassification.from_config(config)
-tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
-tokenizer.pad_token_id = tokenizer.eos_token_id
+
+
+# with open("./.env") as file:
+#     for line in file:
+#        token = line
+# model_name = "google/gemma-7b"
+# config = AutoConfig.from_pretrained(model_name, num_labels=2, output_hidden_states=False, token=token)
+# model = AutoModelForSequenceClassification.from_config(config)
+# tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
+# tokenizer.pad_token_id = tokenizer.eos_token_id
+
+
+
 # model = AutoModelForCausalLM.from_pretrained(model_name,token=toke`n)
 # tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
 
@@ -100,11 +111,11 @@ tokenizer.pad_token_id = tokenizer.eos_token_id
 # model_inputs = encodeds.to(device)
 
 
-input_text = "Write me a poem about Machine Learning."
-model_inputs = tokenizer(input_text, return_tensors="pt").to("cuda")
-model.to(device)
-start = time.time()
-generated_ids = model.generate(**model_inputs)
-print("tokens per second: ", (generated_ids.shape[1] - model_inputs["input_ids"].shape[1] )/ (time.time()-start))
-decoded = tokenizer.batch_decode(generated_ids)
-print(decoded[0]) 
+# input_text = "Write me a poem about Machine Learning."
+# model_inputs = tokenizer(input_text, return_tensors="pt").to("cuda")
+# model.to(device)
+# start = time.time()
+# generated_ids = model.generate(**model_inputs)
+# print("tokens per second: ", (generated_ids.shape[1] - model_inputs["input_ids"].shape[1] )/ (time.time()-start))
+# decoded = tokenizer.batch_decode(generated_ids)
+# print(decoded[0]) 

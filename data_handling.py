@@ -65,7 +65,7 @@ CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
 # Create model and tokenizer
 def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased',
-                             dataset=None,  vocab_size=10000, max_length=512):
+                             dataset=None, section=None, vocab_size=10000, embed_dim = None, n_classes = None, max_length=512):
 
     if args.validation or args.continue_training:
         if model_name == 'distilbert-base-uncased':

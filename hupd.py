@@ -155,7 +155,7 @@ class Patents(datasets.GeneratorBasedBuilder):
                 description="Patent data from January 2016, for debugging", 
                 metadata_url="./hupd_metadata_jan16_2022-02-22.feather",
                 data_url="",
-                data_dir="./data/sample",   # this will unpack to data/{year}
+                data_dir="./data",   # this will unpack to data/{year}
             ),
             PatentsConfig(
                 name="all", 
@@ -276,7 +276,7 @@ class Patents(datasets.GeneratorBasedBuilder):
             final_df = pd.DataFrame()
             for file in os.listdir(json_dir):
                 year = file.split(".")
-                if len(year) == 1 and year[0] in ['2013', '2017']:
+                if len(year) == 1 and year[0] in ['2008', '2009', '2010', '2012', '2013', '2014']:
                 # if len(year) == 1:
                     print(year)
                     start  = f"{year[0]}-01-01"

@@ -34,7 +34,7 @@ from transformers import get_linear_schedule_with_warmup
 #additional metrics
 from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
 
-from data_handling import map_decision_to_string, create_model_and_tokenizer, dataset_statistics, measure_accuracy, create_dataset
+from data_handling import map_decision_to_string, create_model_and_tokenizer, dataset_statistics, measure_accuracy, create_dataset, convert_ids_to_string
 
 # For filtering out CONT-apps and pending apps
 RANDOM_SEED = 1729
@@ -319,14 +319,24 @@ if __name__ == '__main__':
 
     if args.validation:
         write_file = ""
-        args.dataset_name = "sample"
+        args.dataset_name = "all"
         args.tensorboard = None
         args.uniform_split = False
         args.val_set_balancer = True
-        args.train_filing_start_date = '2016-01-01'
-        args.train_filing_end_date = '2016-01-21'
-        args.val_filing_start_date = '2016-01-01'
-        args.val_filing_end_date = '2016-01-31'
+        args.train_filing_start_date = '2017-01-01'
+        args.train_filing_end_date = '2017-01-21'
+        args.val_filing_start_date = '2017-01-01'
+        args.val_filing_end_date = '2017-01-31'
+    # if args.validation:
+    #     write_file = ""
+    #     args.dataset_name = "sample"
+    #     args.tensorboard = None
+    #     args.uniform_split = False
+    #     args.val_set_balancer = True
+    #     args.train_filing_start_date = '2016-01-01'
+    #     args.train_filing_end_date = '2016-01-21'
+    #     args.val_filing_start_date = '2016-01-01'
+    #     args.val_filing_end_date = '2016-01-31'
 
     else:
         write_file = open(args.filename, "w")
@@ -421,6 +431,7 @@ if __name__ == '__main__':
     # Scheduler
     scheduler = get_linear_schedule_with_warmup(optim, num_warmup_steps = 0, num_training_steps = total_steps) if args.use_scheduler else None
 
+    
     # Loss function 
     # torch.nn.BCEWithLogitsLoss  #investigate binary loss
     # if len(CLASS_NAMES)> 2:
@@ -436,6 +447,7 @@ if __name__ == '__main__':
 
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
+    
 
     if args.wandb:
         wandb_project_name = 'PatentClassification_' + cat_label
