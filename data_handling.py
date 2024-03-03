@@ -171,16 +171,18 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             if section == "examiner":
                 dataset = dataset.map(combine, num_proc=args.num_proc)
 
-            cols_keep = [section, "labels"]
 
-            for col in dataset.column_names:
-                if col not in cols_keep:
-                    dataset = dataset.remove_columns(col)
             
 
             dataset = dataset.map(
                 lambda e: tokenizer(e[section], truncation=True, padding='max_length'),
                 batched=True, num_proc=args.num_proc)
+
+            cols_keep = ['input_ids', 'attention_mask', 'labels']
+
+            for col in dataset.column_names:
+                if col not in cols_keep:
+                    dataset = dataset.remove_columns(col)
                 
 
             # Set the dataset format

@@ -139,7 +139,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             inputs = inputs.to(device, non_blocking=True)
             decisions = decisions.to(device, non_blocking=True)
             
-            outputs = model(input_ids=inputs, labels=decisions)
+            outputs = model(**batch)
 
             # Backward pass
             if args.accumulation_steps:
