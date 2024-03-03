@@ -71,8 +71,8 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
             
         with torch.no_grad():
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
-        loss = outputs.loss
         logits = outputs.logits
+        loss = criterion(logits, decisions)
         total_loss += loss.cpu().item()
 
         preds = torch.argmax(logits, axis=1).flatten()
@@ -141,10 +141,11 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
 
             
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
+            loss = criterion(outputs.logits, decisions)
 
             # Backward pass
             if args.accumulation_steps:
-                loss += outputs.loss
+                loss += 0
                 if k !=0 and k % args.accumulation_steps == 0:
                     loss.backward()
                     optim.step()
@@ -154,7 +155,6 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                     k = 0
                     loss = 0
             else:
-                loss = outputs.loss
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
@@ -239,7 +239,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
