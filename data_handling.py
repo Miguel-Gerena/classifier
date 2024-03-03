@@ -151,10 +151,10 @@ def map_decision_to_string(example):
     'CONT-ACCEPTED': 4, 
     'CONT-PENDING': 5
 }
-    return {'output': decision_to_str[example['decision']]}
+    return {'labels': decision_to_str[example['decision']]}
 
 # Create dataset
-def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampler=True, write_file=None):
+def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_data_loader=True, ):
     data_loaders = []
     for name in ['train', 'validation']:
         # Skip the training set if we are doing only inference
@@ -171,7 +171,7 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
             if section == "examiner":
                 dataset = dataset.map(combine, num_proc=args.num_proc)
 
-            cols_keep = [section, "output", "decision"]
+            cols_keep = [section, "labels"]
 
             for col in dataset.column_names:
                 if col not in cols_keep:
@@ -185,32 +185,17 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract', use_wsampl
 
             # Set the dataset format
             dataset.set_format(type='torch', 
-                columns=['input_ids', 'attention_mask', 'output'])
+                columns=['input_ids', 'attention_mask', 'labels'])
 
-            # Check if we are using a weighted sampler for the training set
-            if use_wsampler and name == 'train':
-                # https://discuss.pytorch.org/t/balanced-sampling-between-classes-with-torchvision-dataloader/2703/10
-                target = dataset['output']
-                class_sample_count = torch.tensor([(target == t).sum() for t in torch.unique(target, sorted=True)])
-                weight = 1. / class_sample_count.float()
-                samples_weight = torch.tensor([weight[t] for t in target])
-                sampler = WeightedRandomSampler(weights=samples_weight, num_samples=len(samples_weight), replacement=True)
-                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size, sampler=sampler))
-                print(f'*** Set: {name} (using a weighted sampler).')
-                print(f'*** Weights: {weight}')
-                if write_file:
-                    write_file.write(f'*** Set: {name} (using a weighted sampler).\n')
-                    write_file.write(f'*** Weights: {weight}\n')
-            else:
-                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')))
-    return data_loaders
+            data_loaders.append(dataset)
+    return [DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')) for dataset in data_loaders] if return_data_loader else data_loaders
 
 
 # Return label statistics of the dataset loader
 def dataset_statistics(dataset_loader):
     label_stats = collections.Counter()
     for i, batch in enumerate(tqdm(dataset_loader)):
-        _, decisions = batch['input_ids'], batch['output']
+        _, decisions = batch['input_ids'], batch['labels']
         labels = decisions.cpu().numpy().flatten()
         label_stats += collections.Counter(labels)
     return label_stats
