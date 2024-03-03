@@ -64,9 +64,13 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
         # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
-        decisions = batch['labels'].to(device)
+        inputs, decisions, masks = batch['input_ids'], batch['labels'], batch['attention_mask']
+        inputs = inputs.to(device)
+        decisions = decisions.to(device)
+        masks = masks.to(device)
+            
         with torch.no_grad():
-            outputs = model(**batch)
+            outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
         loss = outputs.loss
         logits = outputs.logits
         total_loss += loss.cpu().item()
@@ -130,11 +134,13 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         k = 0
         # loss = torch.tensor(0, requires_grad=True)
         for i, batch in enumerate(tqdm(data_loaders[0])):
-            inputs, decisions = batch['input_ids'], batch['labels']
+            inputs, decisions, masks = batch['input_ids'], batch['labels'], batch['attention_mask']
             inputs = inputs.to(device, non_blocking=True)
             decisions = decisions.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
+
             
-            outputs = model(**batch)
+            outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
 
             # Backward pass
             if args.accumulation_steps:
@@ -226,10 +232,6 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
         write_file.write(f'\n*** Highest accuracy on the validation set: {best_val_acc}.')
         write_file.write(f'\n*** Highest f1 accuracy on the validation set: {best_f1}.')
     
-    # Additionally, print the performance of the model on the training set if we were not doing only inference
-    if not args.validation:
-        validation(args,data_loaders[0], model, criterion, device, name='train', tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
-
 
 if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
