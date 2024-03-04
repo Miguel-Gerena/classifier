@@ -12,7 +12,6 @@ from tqdm import tqdm
 import datetime
 import json
 import pandas as pd
-# import lora, mistal7b
 
 # wandb
 try:
@@ -29,7 +28,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from datasets import load_dataset
 
 # For scheduling 
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_constant_schedule_with_warmup
 
 #additional metrics
 from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
@@ -138,7 +137,6 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             inputs = inputs.to(device, non_blocking=True)
             decisions = decisions.to(device, non_blocking=True)
             masks = masks.to(device, non_blocking=True)
-
             
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
             loss = criterion(outputs.logits, decisions)
@@ -148,6 +146,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 loss += 0
                 if k !=0 and k % args.accumulation_steps == 0:
                     loss.backward()
+                    if args.clip_norm:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip)
                     optim.step()
                     if scheduler:
                         scheduler.step()
@@ -157,6 +157,8 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
             else:
                 optim.zero_grad()
                 loss.backward()
+                if args.clip_norm:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip)
                 optim.step()
                 if scheduler:
                     scheduler.step()
@@ -259,7 +261,7 @@ if __name__ == '__main__':
     parser.add_argument('--accumulation_steps', default=0, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
-    parser.add_argument('--batch_size', type=dict, default={'train':8, 'validation':48}, help='Batch size.')
+    parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
@@ -272,14 +274,21 @@ if __name__ == '__main__':
     parser.add_argument('--continue_training', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--linear_probe', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
+    parser.add_argument('--warmup_ratio', type=float, default=0.03, help='Fraction of steps to do a warmup for')
+    parser.add_argument('--grad_norm_clip', type=float, default=0.3, help='Clip the grad norm')
+    parser.add_argument('--clip_norm', type=bool, default=False, help='Clip the grad norm')
+    parser.add_argument('--use_flash_attention_2', type=bool, default=False, help='Use flash attention')
+    parser.add_argument('--QloRA', type=bool, default=True, help='Use QloRA')
+
+
 
     # Saving purposes
     parser.add_argument('--filename', type=str, default=None, help='Name of the results file to be saved.')
     
 
-    mistral_model_name = "distilbert-base-uncased"
+    mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/epoch_"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_3_hr_10/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -287,7 +296,7 @@ if __name__ == '__main__':
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
-    parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
+    parser.add_argument('--max_length', type=int, default=4096, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
 
     
     # Parse args
@@ -304,7 +313,7 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+    path_params  = f"{args.section}_{args.model_name.split("/")[-1]}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -323,10 +332,10 @@ if __name__ == '__main__':
     #     args.tensorboard = None
     #     args.uniform_split = False
     #     args.val_set_balancer = True
-    #     args.train_filing_start_date = '2015-01-01'
-    #     args.train_filing_end_date = '2017-12-31'
-    #     args.val_filing_start_date = '2015-01-01'
-    #     args.val_filing_end_date = '2017-12-31'
+    #     args.train_filing_start_date = '2017-01-01'
+    #     args.train_filing_end_date = '2017-01-21'
+    #     args.val_filing_start_date = '2017-01-01'
+    #     args.val_filing_end_date = '2017-01-31'
     if args.validation:
         write_file = ""
         args.dataset_name = "sample"
@@ -427,14 +436,17 @@ if __name__ == '__main__':
         params = list(model.get_submodule("pre_classifier").parameters()) + list(model.get_submodule("classifier").parameters())
 
     optim = torch.optim.AdamW(params=model.parameters() if not args.linear_probe else params, lr=args.lr, eps=args.eps)
-    total_steps = len(data_loaders[0]) * args.epoch_n if not args.validation else 0
-    # Scheduler
-    scheduler = get_linear_schedule_with_warmup(optim, num_warmup_steps = 0, num_training_steps = total_steps) if args.use_scheduler else None
+    # optim = torch.optim.AdamW(params=model.parameters(), lr=script_args.lr, weight_decay=script_args.weight_decay)
 
-    
-    # Loss function 
-    # torch.nn.BCEWithLogitsLoss  #investigate binary loss
-    # if len(CLASS_NAMES)> 2:
+
+    # Instantiate scheduler
+    if not args.validation:
+        scheduler = get_constant_schedule_with_warmup(
+            optimizer=optim,
+            num_warmup_steps=args.warmup_ratio * (len(data_loaders[0]) * args.epoch_n),
+        ) if args.use_scheduler else None
+
+
     class_weights = None
     if args.handle_skew_data and not args.validation:
         total_examples = sum(train_label_stats.values())
@@ -459,9 +471,6 @@ if __name__ == '__main__':
     # Train and validate
     if not args.validation:
         train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, device, write_file, tensorboard_writer)
-        if args.save_path:
-            model.save_pretrained(args.save_path + "final_model")
-            tokenizer.save_pretrained(args.save_path + 'final_tokenizer')
     else:
         validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer)
 

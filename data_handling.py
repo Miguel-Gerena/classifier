@@ -22,6 +22,16 @@ from transformers import GPT2ForSequenceClassification, GPT2Tokenizer, GPT2Confi
 from transformers import LongformerForSequenceClassification, LongformerTokenizer, LongformerConfig
 from transformers import PreTrainedTokenizerFast
 from transformers import BitsAndBytesConfig
+from transformers import MistralConfig, MistralForSequenceClassification
+
+from QloRA_models import mistral_QLoRA
+
+from peft import (
+    get_peft_model,
+    LoraConfig,
+    PeftType,
+)
+
 
 
 # Import the sklearn Multinomial Naive Bayes
@@ -79,9 +89,18 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 model = DistilBertForSequenceClassification(config=config)
   
         elif model_name == 'mistralai/Mistral-7B-v0.1':
-            config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
-            model = AutoModelForSequenceClassification.from_config(config)
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            if  args.model_path:
+                print("**" * 4, "Loading Pre-trained weights", "**" * 4)
+                model = MistralForSequenceClassification.pre_trained(args.model_path)
+                tokenizer = AutoTokenizer.from_pretrained(args.model_path, padding_side="right")
+            else:
+                config = MistralConfig.from_pretrained(
+                    model_name,
+                    num_labels=CLASSES, 
+                    output_hidden_states=False, 
+                    attn_implementation="sdpa" if not args.use_flash_attention_2 else "flash_attention_2")
+                model = MistralForSequenceClassification.pre_trained(config)
+                tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="right")
         elif model_name == "google/gemma-2b":
             with open("./.env") as file:
                 for line in file:
@@ -90,11 +109,11 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False, token=token, quantization_config=quantization_config, device_map="auto")
             model = AutoModelForSequenceClassification.from_config(config)
             tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
-            tokenizer.pad_token_id = tokenizer.eos_token_id
-
         else:
             raise NotImplementedError
         # This step is actually important.
+        if getattr(tokenizer, "pad_token_id") is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
         tokenizer.max_length = max_length
         tokenizer.model_max_length = max_length
     else:
@@ -124,16 +143,22 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             if model_name in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
                 config = AutoConfig.from_pretrained(model_name, num_labels=CLASSES, output_hidden_states=False)
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                if model_name in ['gpt2', 'mistralai/Mistral-7B-v0.1', "google/gemma-7b", "google/gemma-2b"]:
-                    tokenizer.pad_token = tokenizer.eos_token
-                tokenizer.max_length = max_length
-                tokenizer.model_max_length = max_length
+                            
                 if model_name == 'mistralai/Mistral-7B-v0.1':
-                    rank = 64
-                    model = mistal7b.CustomizedMistralModel(model_name=model_name, rank=rank, num_labels=CLASSES)
+                    if args.QloRA:
+                        model = mistral_QLoRA(args, CLASSES)
+                    else:
+                        model = MistralForSequenceClassification._from_config(config)
+                    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="right")
                 else:
                     model = AutoModelForSequenceClassification.from_config(config=config)
-            
+
+                if getattr(tokenizer, "pad_token_id") is None:
+                    tokenizer.pad_token_id = tokenizer.eos_token_id
+                tokenizer.max_length = max_length
+                tokenizer.model_max_length = max_length
+
+
     if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
         print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
     else:
@@ -188,9 +213,12 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             # Set the dataset format
             dataset.set_format(type='torch', 
                 columns=['input_ids', 'attention_mask', 'labels'])
-
-            data_loaders.append(dataset)
-    return [DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')) for dataset in data_loaders] if return_data_loader else data_loaders
+            
+            if return_data_loader:
+                data_loaders.append(DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')))
+            else:
+                data_loaders.append(dataset)
+    return data_loaders
 
 
 # Return label statistics of the dataset loader

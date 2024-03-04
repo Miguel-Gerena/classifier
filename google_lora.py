@@ -172,8 +172,7 @@ def main():
     for name in ['train', 'validation']:
         dataset_dict[name] = dataset_dict[name].map(map_decision_to_string, num_proc=args.num_proc)
         # Remove the pending and CONT-patent applications
-        dataset_dict[name] = dataset_dict[name].filter(lambda e: e['output'] <= 1)
-        dataset_dict[name] = dataset_dict[name].rename_column("output", "labels")
+        dataset_dict[name] = dataset_dict[name].filter(lambda e: e['labels'] <= 1)
         dataset_dict[name] = dataset_dict[name].remove_columns(set(dataset_dict[name].column_names) - set(["labels", args.section]))
 
     # def collate_fn(examples):
