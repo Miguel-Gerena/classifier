@@ -279,7 +279,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "distilbert-base-uncased"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_200_True_all_False_date_3_2_hr_8/"
+    model_path = "CS224N_models/distilbert-base-uncased/abstract_distilbert-base-uncased_2_16_2e-05_512_200_False_all_date_2_23_hr_21/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -317,26 +317,26 @@ if __name__ == '__main__':
         filename = f'{cat_label}_{args.section}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
 
-    if args.validation:
-        write_file = ""
-        args.dataset_name = "all"
-        args.tensorboard = None
-        args.uniform_split = False
-        args.val_set_balancer = True
-        args.train_filing_start_date = '2017-01-01'
-        args.train_filing_end_date = '2017-01-21'
-        args.val_filing_start_date = '2017-01-01'
-        args.val_filing_end_date = '2017-01-31'
     # if args.validation:
     #     write_file = ""
-    #     args.dataset_name = "sample"
+    #     args.dataset_name = "all"
     #     args.tensorboard = None
     #     args.uniform_split = False
     #     args.val_set_balancer = True
-    #     args.train_filing_start_date = '2016-01-01'
-    #     args.train_filing_end_date = '2016-01-21'
-    #     args.val_filing_start_date = '2016-01-01'
-    #     args.val_filing_end_date = '2016-01-31'
+    #     args.train_filing_start_date = '2015-01-01'
+    #     args.train_filing_end_date = '2017-12-31'
+    #     args.val_filing_start_date = '2015-01-01'
+    #     args.val_filing_end_date = '2017-12-31'
+    if args.validation:
+        write_file = ""
+        args.dataset_name = "sample"
+        args.tensorboard = None
+        args.uniform_split = False
+        args.val_set_balancer = True
+        args.train_filing_start_date = '2016-01-01'
+        args.train_filing_end_date = '2016-01-21'
+        args.val_filing_start_date = '2016-01-01'
+        args.val_filing_end_date = '2016-01-31'
 
     else:
         write_file = open(args.filename, "w")
