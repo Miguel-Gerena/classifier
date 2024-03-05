@@ -6,48 +6,54 @@ if os.getlogin() == "darke":
 
 import torch
 
-
 from transformers import BitsAndBytesConfig
 from transformers import MistralConfig, MistralForSequenceClassification
 
 from peft import (
     get_peft_model,
     LoraConfig,
-    PeftType,
+    prepare_model_for_kbit_training,
+    PeftType,TaskType
 )
 
-def get_config(lora_alpha=16, lora_dropout=0.1, lora_r=8):
+
+def get_config(lora_alpha=16, lora_dropout=0.1, lora_r=64):
     peft_type = PeftType.LORA
-    quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_quant_type="nf4",
+    peft_config = LoraConfig(
+    r=lora_r,
+    lora_alpha=lora_alpha,
+    lora_dropout=lora_dropout,
+    bias="none",
+    task_type=TaskType.SEQ_CLS,
+    inference_mode=False,
+    target_modules=[
+        "q_proj",
+        "v_proj"
+    ],
 )
 
-    peft_config = LoraConfig(
-        r=lora_r,
-        target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        bias="none",
-        task_type="SEQ_CLS",
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        inference_mode=False
-    )
-    return quantization_config, peft_config
+    bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+    return peft_config, bnb_config
 
-def mistral_QLoRA(args, classes, lora_alpha=16, lora_dropout=0.1, lora_r=8):
-    quantization_config, peft_config = get_config(lora_alpha, lora_dropout, lora_r)
+def mistral_QLoRA(args, classes, tokenizer, lora_alpha=16, lora_dropout=0.1, lora_r=64):
+    peft_config, bnb_config = get_config(lora_alpha, lora_dropout, lora_r)
     model_name = 'mistralai/Mistral-7B-v0.1'
-    config = MistralConfig.from_pretrained(
+    model = MistralForSequenceClassification.from_pretrained(
         model_name,
-        num_labels=classes, 
-        output_hidden_states=False, 
-        quantization_config=quantization_config, 
-        torch_dtype=torch.float32,
-        low_cpu_mem_usage=True,
-        return_dict=True,
-        device_map="auto",
-        attn_implementation="sdpa" if not args.use_flash_attention_2 else "flash_attention_2")
-    model = MistralForSequenceClassification._from_config(config)
+        num_labels=classes,
+        quantization_config=bnb_config,
+        )
+
+    #Setting the Pretraining_tp to 1 ensures we are using the Linear Layers to the max computation possible
+
+    #Ensuring the model is aware about the pad token ID
+    model = prepare_model_for_kbit_training(model)
     model = get_peft_model(model, peft_config)
+    model.config.pretraining_tp = 1 #For Us this would be 7B
+    model.config.pad_token_id = tokenizer.pad_token_id
     return model

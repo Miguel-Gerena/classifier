@@ -36,7 +36,7 @@ from torcheval.metrics import BinaryAccuracy, BinaryF1Score, BinaryAUPRC
 from data_handling import map_decision_to_string, create_model_and_tokenizer, dataset_statistics, measure_accuracy, create_dataset, convert_ids_to_string
 
 # For filtering out CONT-apps and pending apps
-RANDOM_SEED = 1729
+RANDOM_SEED = 33
 torch.manual_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
@@ -120,51 +120,59 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
     print('\n>>>Training starts...')
     if write_file:
         write_file.write('\n>>>Training starts...\n')
+        write_file.flush()
     # Training mode is on
     model.train()
     # Best validation set accuracy so far.
     best_val_acc = 0
     best_f1 = 0
+    
 
 
     for epoch in range(epoch_n):
         total_train_loss = 0.
         # Loop over the examples in the training set.
         k = 0
-        # loss = torch.tensor(0, requires_grad=True)
+        loss = torch.tensor(0, dtype=torch.float32, requires_grad=True).to(device)
         for i, batch in enumerate(tqdm(data_loaders[0])):
             inputs, decisions, masks = batch['input_ids'], batch['labels'], batch['attention_mask']
             inputs = inputs.to(device, non_blocking=True)
             decisions = decisions.to(device, non_blocking=True)
             masks = masks.to(device, non_blocking=True)
-            
-            outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
-            loss = criterion(outputs.logits, decisions)
+
+            logits = model(input_ids=inputs, labels=decisions, attention_mask=masks).logits
+            # logits = logits.type(torch.float32)
 
             # Backward pass
             if args.accumulation_steps:
-                loss += 0
+                # loss = min(loss + criterion(logits, decisions),  torch.tensor(15, dtype=torch.float32, requires_grad=True).to(device))
+                loss = loss + criterion(logits, decisions)  
                 if k !=0 and k % args.accumulation_steps == 0:
+                    total_train_loss += loss.cpu().item()
                     loss.backward()
                     if args.clip_norm:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip, error_if_nonfinite=True)
                     optim.step()
                     if scheduler:
                         scheduler.step()
                     optim.zero_grad()
                     k = 0
-                    loss = 0
+                    loss = torch.tensor(0, dtype=torch.float32, requires_grad=True).to(device)
+                else:
+                    k += 1
             else:
+                loss = criterion(logits, decisions)
+                print(loss)
                 optim.zero_grad()
                 loss.backward()
                 if args.clip_norm:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm_clip, error_if_nonfinite=True)
                 optim.step()
                 if scheduler:
                     scheduler.step()
             
-            total_train_loss += loss.cpu().item()
-            # wandb (optional)
+                total_train_loss += loss.cpu().item()
+            # wandb (optional) 
             if args.wandb:
                 wandb.log({'Training Loss': loss})
             
@@ -258,27 +266,28 @@ if __name__ == '__main__':
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
-    parser.add_argument('--accumulation_steps', default=0, help='Num steps to accum gradient')
+    parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', default=False, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
-    parser.add_argument('--lr', type=float, default=2e-5, help='Model learning rate.')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Model learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb project name.')
-    parser.add_argument('--use_scheduler', action='store_true', help='Use a scheduler.')
+    parser.add_argument('--use_scheduler', default=True, help='Use a scheduler.')
     parser.add_argument('--tensorboard', default=True, help='Use tensorboard.')
     parser.add_argument('--handle_skew_data', type=bool, default=True, help='Add class weights based on their fraction of the total data')
     parser.add_argument('--continue_training', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--linear_probe', type=bool, default=False, help='Load weights and continue training')
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
     parser.add_argument('--warmup_ratio', type=float, default=0.03, help='Fraction of steps to do a warmup for')
-    parser.add_argument('--grad_norm_clip', type=float, default=0.3, help='Clip the grad norm')
-    parser.add_argument('--clip_norm', type=bool, default=False, help='Clip the grad norm')
+    parser.add_argument('--grad_norm_clip', type=float, default=1, help='Clip the grad norm')
+    parser.add_argument('--clip_norm', type=bool, default=False , help='Clip the grad norm')
     parser.add_argument('--use_flash_attention_2', type=bool, default=False, help='Use flash attention')
     parser.add_argument('--QloRA', type=bool, default=True, help='Use QloRA')
+    parser.add_argument('--weight_decay', default=0.01, help='Use weight_decay')
 
 
 
@@ -288,7 +297,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_3_hr_10/epoch_"
+    model_path = "CS224N_models/mistralai/Mistral-7B-v0.1/claims_Mistral-7B-v0.1_2_8_0.0001_512_False_sample_False_date_3_3_hr_18/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -296,12 +305,13 @@ if __name__ == '__main__':
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
-    parser.add_argument('--max_length', type=int, default=4096, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
+    parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
 
     
     # Parse args
     args = parser.parse_args()
     epoch_n = args.epoch_n
+    args.device = device
 
     # Subject area code label
     cat_label = ''
@@ -313,7 +323,7 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name.split("/")[-1]}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+    path_params  = f"{args.section}_{args.model_name.split("/")[-1]}_{args.epoch_n}_{args.batch_size['train'] if not args.accumulation_steps else args.accumulation_steps*args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -338,14 +348,14 @@ if __name__ == '__main__':
     #     args.val_filing_end_date = '2017-01-31'
     if args.validation:
         write_file = ""
-        args.dataset_name = "sample"
+        args.dataset_name = "all"
         args.tensorboard = None
         args.uniform_split = False
         args.val_set_balancer = True
-        args.train_filing_start_date = '2016-01-01'
-        args.train_filing_end_date = '2016-01-21'
-        args.val_filing_start_date = '2016-01-01'
-        args.val_filing_end_date = '2016-01-31'
+        args.train_filing_start_date = '2015-01-01'
+        args.train_filing_end_date = '2015-01-15'
+        args.val_filing_start_date = '2015-01-01'
+        args.val_filing_end_date = '2015-12-31'
 
     else:
         write_file = open(args.filename, "w")
@@ -357,10 +367,6 @@ if __name__ == '__main__':
         tensorboard_writer = tensorboard.SummaryWriter(log_dir=t_path)
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
-    
-    # Make the batch size 1 when using an NB classifier
-    if args.model_name == 'naive_bayes':
-        args.batch_size = 1
 
     # Load the dataset dictionary
     dataset_dict = load_dataset(args.dataset_load_path , 
@@ -383,12 +389,11 @@ if __name__ == '__main__':
 
     
     # Create a model and an appropriate tokenizer
-    tokenizer, dataset_dict, model, vocab_size = create_model_and_tokenizer(
+    tokenizer, dataset_dict, model = create_model_and_tokenizer(
         args=args,
         train_from_scratch = args.train_from_scratch, 
         model_name = args.model_name, 
         dataset = dataset_dict,
-        vocab_size = args.vocab_size,
         max_length=args.max_length
         )
 
@@ -400,12 +405,8 @@ if __name__ == '__main__':
         write_file.write(f'*** date time: {now.month}_{now.day}_hr_{now.hour}\n')
         write_file.write(f'*** CPC Label: {cat_label}\n')
         write_file.write(f'*** Section: {args.section}\n')
-        write_file.write(f'*** Vocabulary: {args.vocab_size}\n')
         write_file.write(f'*** args: {args}\n\n')
 
-    # GPU specifications 
-    if args.model_name != 'naive_bayes':
-        model.to(device)
 
     # Load the dataset
     data_loaders = create_dataset(
@@ -418,6 +419,8 @@ if __name__ == '__main__':
 
     if not args.validation:
         # Print the statistics
+        trainable_params = model.print_trainable_parameters()
+        write_file.write(f"{trainable_params}\n")
         train_label_stats = dataset_statistics( data_loaders[0])
         print(f'*** Training set label statistics: {train_label_stats}')
 
@@ -435,15 +438,15 @@ if __name__ == '__main__':
     if args.linear_probe:
         params = list(model.get_submodule("pre_classifier").parameters()) + list(model.get_submodule("classifier").parameters())
 
-    optim = torch.optim.AdamW(params=model.parameters() if not args.linear_probe else params, lr=args.lr, eps=args.eps)
-    # optim = torch.optim.AdamW(params=model.parameters(), lr=script_args.lr, weight_decay=script_args.weight_decay)
+    # optim = torch.optim.AdamW(params=model.parameters() if not args.linear_probe else params, lr=args.lr, eps=args.eps)
+    optim = torch.optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas = (0.9, 0.95))
 
 
     # Instantiate scheduler
     if not args.validation:
         scheduler = get_constant_schedule_with_warmup(
             optimizer=optim,
-            num_warmup_steps=args.warmup_ratio * (len(data_loaders[0]) * args.epoch_n),
+            num_warmup_steps=100,
         ) if args.use_scheduler else None
 
 
@@ -459,8 +462,7 @@ if __name__ == '__main__':
 
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
-    
-
+ 
     if args.wandb:
         wandb_project_name = 'PatentClassification_' + cat_label
         wandb.init(project=wandb_project_name, name=args.wandb_name)
