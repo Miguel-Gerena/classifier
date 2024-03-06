@@ -11,6 +11,8 @@ import numpy as np
 import collections
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
+import pandas as pd
+from datasets import Dataset
 
 
 # Good old Transformer models
@@ -63,7 +65,7 @@ except ImportError:
 
 
 # Fixing the random seeds
-RANDOM_SEED = 1729
+RANDOM_SEED = 33
 torch.manual_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
@@ -75,7 +77,7 @@ CLASS_NAMES = [i for i in range(CLASSES-1, -1, -1)]
 
 # Create model and tokenizer
 def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-base-uncased',
-                             dataset=None, section=None, vocab_size=10000, embed_dim = None, n_classes = None, max_length=512):
+                             dataset=None,  max_length=512):
 
     if args.validation or args.continue_training:
         if model_name == 'distilbert-base-uncased':
@@ -91,15 +93,15 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
         elif model_name == 'mistralai/Mistral-7B-v0.1':
             if  args.model_path:
                 print("**" * 4, "Loading Pre-trained weights", "**" * 4)
-                model = MistralForSequenceClassification.pre_trained(args.model_path)
-                tokenizer = AutoTokenizer.from_pretrained(args.model_path, padding_side="right")
+                model = MistralForSequenceClassification.from_pretrained(args.model_path)
+                tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path, padding_side="right")
             else:
                 config = MistralConfig.from_pretrained(
                     model_name,
                     num_labels=CLASSES, 
                     output_hidden_states=False, 
                     attn_implementation="sdpa" if not args.use_flash_attention_2 else "flash_attention_2")
-                model = MistralForSequenceClassification.pre_trained(config)
+                model = MistralForSequenceClassification.from_pretrained(config)
                 tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="right")
         elif model_name == "google/gemma-2b":
             with open("./.env") as file:
@@ -112,8 +114,9 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
         else:
             raise NotImplementedError
         # This step is actually important.
-        if getattr(tokenizer, "pad_token_id") is None:
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token_id = tokenizer.pad_token_id
+
         tokenizer.max_length = max_length
         tokenizer.model_max_length = max_length
     else:
@@ -145,25 +148,23 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
                             
                 if model_name == 'mistralai/Mistral-7B-v0.1':
+                    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="right")
+                    tokenizer.pad_token_id = tokenizer.eos_token_id
                     if args.QloRA:
-                        model = mistral_QLoRA(args, CLASSES)
+                        model = mistral_QLoRA(args, CLASSES, tokenizer)
                     else:
                         model = MistralForSequenceClassification._from_config(config)
-                    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="right")
                 else:
                     model = AutoModelForSequenceClassification.from_config(config=config)
 
-                if getattr(tokenizer, "pad_token_id") is None:
-                    tokenizer.pad_token_id = tokenizer.eos_token_id
+                
                 tokenizer.max_length = max_length
                 tokenizer.model_max_length = max_length
 
 
-    if model in ['bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 'gpt2', 'allenai/longformer-base-4096', 'mistralai/Mistral-7B-v0.1', "google/gemma-2b", "google/gemma-7b"]:
-        print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
-    else:
-        print(model)
-    return tokenizer, dataset, model, vocab_size
+    print(f'Model name: {model_name} \nModel params: {model.num_parameters()}')
+    model.to(args.device)
+    return tokenizer, dataset, model
 
 
 # Map decision2string
@@ -202,12 +203,22 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             dataset = dataset.map(
                 lambda e: tokenizer(e[section], truncation=True, padding='max_length'),
                 batched=True, num_proc=args.num_proc)
+            
+
 
             cols_keep = ['input_ids', 'attention_mask', 'labels']
 
             for col in dataset.column_names:
                 if col not in cols_keep:
                     dataset = dataset.remove_columns(col)
+            
+            if os.getlogin() == "darke":
+                a = pd.DataFrame(dataset)
+                c = a[a["labels"] == 0 ][:1000]
+                b = a[a["labels"] == 1 ][:1000]
+                new_data = pd.concat([b, c])
+                dataset = Dataset.from_pandas(new_data)
+                dataset = dataset.remove_columns("__index_level_0__")
                 
 
             # Set the dataset format
