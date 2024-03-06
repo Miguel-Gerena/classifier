@@ -67,6 +67,10 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         inputs = inputs.to(device)
         decisions = decisions.to(device)
         masks = masks.to(device)
+
+        # print("inputs", inputs)
+        # print("labels", decisions)
+        # print("attn masks", masks)
             
         with torch.no_grad():
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
@@ -241,7 +245,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     # Dataset
-    parser.add_argument('--dataset_name', default='sample', type=str, help='Patent data directory.')
+    parser.add_argument('--dataset_name', default='all', type=str, help='Patent data directory.')
     parser.add_argument('--dataset_load_path', default='./hupd.py', type=str, help='Patent data main data load path (viz., ../patents.py).')
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
@@ -288,7 +292,7 @@ if __name__ == '__main__':
 
     mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_3_hr_10/epoch_"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_2_hr_21/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -296,7 +300,8 @@ if __name__ == '__main__':
     # parser.add_argument('--save_path', type=str, default=None, help='The path where the model is going to be saved.')
 
     parser.add_argument('--tokenizer_save_path', type=str, default=None, help='The path where the tokenizer is going to be saved.')
-    parser.add_argument('--max_length', type=int, default=4096, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
+    # parser.add_argument('--max_length', type=int, default=4096, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
+    parser.add_argument('--max_length', type=int, default=512, help='The maximum total input sequence length after tokenization. Sequences longer than this number will be trunacated.')
 
     
     # Parse args
@@ -313,7 +318,7 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name.split("/")[-1]}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+    path_params  = f"{args.section}_{args.model_name.split('/')[-1]}_{args.epoch_n}_{args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
