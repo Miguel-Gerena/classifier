@@ -67,11 +67,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
         inputs = inputs.to(device)
         decisions = decisions.to(device)
         masks = masks.to(device)
-
-        # print("inputs", inputs)
-        # print("labels", decisions)
-        # print("attn masks", masks)
-            
+        
         with torch.no_grad():
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
         logits = outputs.logits
@@ -258,10 +254,10 @@ if __name__ == '__main__':
     parser.add_argument('--cpc_label', type=str, default=None, help='CPC label for filtering the data.')
     parser.add_argument('--ipc_label', type=str, default=None, help='IPC label for filtering the data.')
     parser.add_argument('--section', type=str, default='claims', help='Patent application section of interest.')
-    parser.add_argument('--train_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
-    parser.add_argument('--train_filing_end_date', type=str, default='', help='End date for filtering the training data.')
-    parser.add_argument('--val_filing_start_date', type=str, default='', help='Start date for filtering the training data.')
-    parser.add_argument('--val_filing_end_date', type=str, default='', help='End date for filtering the validation data.')
+    parser.add_argument('--train_filing_start_date', type=str, default='2008-01-01', help='Start date for filtering the training data.')
+    parser.add_argument('--train_filing_end_date', type=str, default='2012-01-15', help='End date for filtering the training data.')
+    parser.add_argument('--val_filing_start_date', type=str, default='2008-01-01', help='Start date for filtering the training data.')
+    parser.add_argument('--val_filing_end_date', type=str, default='2014-12-31', help='End date for filtering the validation data.')
     parser.add_argument('--vocab_size', type=int, default=10000, help='Vocabulary size (of the tokenizer).')
     parser.add_argument('--use_wsampler', action='store_true', help='Use a weighted sampler (for the training set).')
     parser.add_argument('--val_set_balancer', action='store_true', help='Use a balanced set for validation? That is, do you want the same number of classes of examples in the validation set.')
@@ -272,7 +268,9 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    # parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    parser.add_argument('--validation', action='store_true', help='Enable validation mode')
+
     parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
@@ -301,7 +299,8 @@ if __name__ == '__main__':
 
     mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
-    model_path = "CS224N_models/mistralai/Mistral-7B-v0.1/claims_Mistral-7B-v0.1_2_8_0.0001_512_False_sample_False_date_3_3_hr_18/epoch_"
+    # model_path = "CS224N_models/mistralai/Mistral-7B-v0.1/claims_Mistral-7B-v0.1_2_8_0.0001_512_False_sample_False_date_3_3_hr_18/epoch_"
+    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_2_hr_21/epoch_"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -327,7 +326,8 @@ if __name__ == '__main__':
         cat_label = 'All_IPCs'
 
 
-    path_params  = f"{args.section}_{args.model_name.split("/")[-1]}_{args.epoch_n}_{args.batch_size['train'] if not args.accumulation_steps else args.accumulation_steps*args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+    path_params  = f"{args.section}_{args.model_name.split('/')[-1]}_{args.epoch_n}_{args.batch_size['train'] if not args.accumulation_steps else args.accumulation_steps*args.batch_size['train']}_{args.lr}_{args.max_length}_{args.continue_training}_{args.dataset_name}_{args.linear_probe}"
+
     if args.save_path and not args.validation:
         now = datetime.datetime.now()
         args.save_path = f"{args.save_path}/{args.model_name}/{path_params}_date_{now.month}_{now.day}_hr_{now.hour}/"
@@ -372,6 +372,7 @@ if __name__ == '__main__':
 
     args.wandb_name = args.wandb_name if args.wandb_name else f'{cat_label}_{args.section}_{args.model_name}'
 
+    # print(f"train start date: {args.train_filing_start_date}\ntrain end date: {args.train_filing_end_date}\nval start data: {args.val_filing_start_date}\nval end date: {args.val_filing_end_date}")
     # Load the dataset dictionary
     dataset_dict = load_dataset(args.dataset_load_path , 
         name=args.dataset_name,

@@ -85,6 +85,7 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 print("**" * 4, "Loading Pre-trained weights", "**" * 4)
                 tokenizer = DistilBertTokenizer.from_pretrained(args.tokenizer_path) 
                 model = DistilBertForSequenceClassification.from_pretrained(args.model_path)
+
             else:
                 config = DistilBertConfig(num_labels=CLASSES, output_hidden_states=False) 
                 tokenizer = DistilBertTokenizer.from_pretrained(model_name, do_lower_case=True)
@@ -113,12 +114,38 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
         else:
             raise NotImplementedError
-        # This step is actually important.
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token_id = tokenizer.pad_token_id
+        
 
-        tokenizer.max_length = max_length
-        tokenizer.model_max_length = max_length
+        if model_name == 'distilbert-base-uncased':
+            need_to_resize_model = False
+
+            if tokenizer.eos_token is None:
+                tokenizer.add_special_tokens({'eos_token': '[EOS]'})
+                need_to_resize_model = True
+            if tokenizer.pad_token is None:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                need_to_resize_model = True
+
+            if need_to_resize_model:
+                model.resize_token_embeddings(len(tokenizer))
+
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+            model.config.pad_token_id = tokenizer.pad_token_id
+
+            tokenizer.max_length = max_length
+            tokenizer.model_max_length = max_length
+
+            tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+            tokenizer.eos_token_id = tokenizer.convert_tokens_to_ids(tokenizer.eos_token)
+
+        else: 
+            # This step is actually important.
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+            model.config.pad_token_id = tokenizer.pad_token_id
+
+            tokenizer.max_length = max_length
+            tokenizer.model_max_length = max_length
+
     else:
         # Train from scratch
         if train_from_scratch:
@@ -157,7 +184,6 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
                 else:
                     model = AutoModelForSequenceClassification.from_config(config=config)
 
-                
                 tokenizer.max_length = max_length
                 tokenizer.model_max_length = max_length
 
@@ -196,9 +222,6 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             
             if section == "examiner":
                 dataset = dataset.map(combine, num_proc=args.num_proc)
-
-
-            
 
             dataset = dataset.map(
                 lambda e: tokenizer(e[section], truncation=True, padding='max_length'),
