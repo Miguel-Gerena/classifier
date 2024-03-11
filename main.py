@@ -266,14 +266,14 @@ if __name__ == '__main__':
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
-    parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
+    parser.add_argument('--accumulation_steps', default=64, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     # parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--validation', action='store_true', help='Enable validation mode')
 
     parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
-    parser.add_argument('--epoch_n', type=int, default=2, help='Number of epochs (for training).')
-    parser.add_argument('--val_every', type=int, default=2000, help='Number of iterations we should take to perform validation.')
+    parser.add_argument('--epoch_n', type=int, default=1, help='Number of epochs (for training).')
+    parser.add_argument('--val_every', type=int, default=2100, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Model learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
@@ -286,7 +286,7 @@ if __name__ == '__main__':
     parser.add_argument('--eps', type=float, default=1e-8, help='Epsilon value for the learning rate.')
     parser.add_argument('--warmup_ratio', type=float, default=0.03, help='Fraction of steps to do a warmup for')
     parser.add_argument('--grad_norm_clip', type=float, default=1, help='Clip the grad norm')
-    parser.add_argument('--clip_norm', type=bool, default=False , help='Clip the grad norm')
+    parser.add_argument('--clip_norm', type=bool, default=True , help='Clip the grad norm')
     parser.add_argument('--use_flash_attention_2', type=bool, default=False, help='Use flash attention')
     parser.add_argument('--QloRA', type=bool, default=True, help='Use QloRA')
     parser.add_argument('--weight_decay', default=0.01, help='Use weight_decay')
@@ -350,16 +350,20 @@ if __name__ == '__main__':
     #     args.train_filing_end_date = '2017-01-21'
     #     args.val_filing_start_date = '2017-01-01'
     #     args.val_filing_end_date = '2017-01-31'
+
     if args.validation:
         write_file = ""
         args.dataset_name = "all"
         args.tensorboard = None
-        args.uniform_split = False
-        args.val_set_balancer = True
+        # args.uniform_split = False
+        # args.val_set_balancer = True
         args.train_filing_start_date = '2015-01-01'
         args.train_filing_end_date = '2015-01-15'
-        args.val_filing_start_date = '2015-01-01'
-        args.val_filing_end_date = '2015-12-31'
+        args.val_filing_start_date = '2015-01-16'
+        args.val_filing_end_date = '2015-2-15'
+        args.uniform_split = True
+        args.val_set_balancer = True
+
 
     else:
         write_file = open(args.filename, "w")
@@ -390,7 +394,7 @@ if __name__ == '__main__':
         dataset_dict[name] = dataset_dict[name].map(map_decision_to_string, num_proc=args.num_proc)
         # Remove the pending and CONT-patent applications
         dataset_dict[name] = dataset_dict[name].filter(lambda e: e['labels'] <= 1)
-        dataset_dict[name] = dataset_dict[name].remove_columns(set(dataset_dict[name].column_names) - set(["labels", args.section]))
+        # dataset_dict[name] = dataset_dict[name].remove_columns(set(dataset_dict[name].column_names) - set(["labels", "patent_number", args.section]))
 
     
     # Create a model and an appropriate tokenizer
@@ -451,7 +455,7 @@ if __name__ == '__main__':
     if not args.validation:
         scheduler = get_constant_schedule_with_warmup(
             optimizer=optim,
-            num_warmup_steps=100,
+            num_warmup_steps=5,
         ) if args.use_scheduler else None
 
 

@@ -94,8 +94,12 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
         elif model_name == 'mistralai/Mistral-7B-v0.1':
             if  args.model_path:
                 print("**" * 4, "Loading Pre-trained weights", "**" * 4)
-                model = MistralForSequenceClassification.from_pretrained(args.model_path)
                 tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path, padding_side="right")
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+                if args.QloRA:
+                    model = mistral_QLoRA(args, CLASSES, tokenizer, model_name=args.model_path)
+                else:
+                    model = MistralForSequenceClassification.from_pretrained(args.model_path, num_labels=CLASSES)
             else:
                 config = MistralConfig.from_pretrained(
                     model_name,
@@ -114,34 +118,7 @@ def create_model_and_tokenizer(args, train_from_scratch=False, model_name='bert-
             tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
         else:
             raise NotImplementedError
-        
-
-        if model_name == 'distilbert-base-uncased':
-            need_to_resize_model = False
-
-            if tokenizer.eos_token is None:
-                tokenizer.add_special_tokens({'eos_token': '[EOS]'})
-                need_to_resize_model = True
-            if tokenizer.pad_token is None:
-                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-                need_to_resize_model = True
-
-            if need_to_resize_model:
-                model.resize_token_embeddings(len(tokenizer))
-
-            tokenizer.pad_token_id = tokenizer.eos_token_id
-            model.config.pad_token_id = tokenizer.pad_token_id
-
-            tokenizer.max_length = max_length
-            tokenizer.model_max_length = max_length
-
-            tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
-            tokenizer.eos_token_id = tokenizer.convert_tokens_to_ids(tokenizer.eos_token)
-
-        else: 
-            # This step is actually important.
-            tokenizer.pad_token_id = tokenizer.eos_token_id
-            model.config.pad_token_id = tokenizer.pad_token_id
+        # This step is actually important.
 
             tokenizer.max_length = max_length
             tokenizer.model_max_length = max_length
@@ -229,24 +206,30 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             
 
 
-            cols_keep = ['input_ids', 'attention_mask', 'labels']
+            cols_keep = ['input_ids', 'attention_mask', 'labels', "patent_number"]
 
-            for col in dataset.column_names:
-                if col not in cols_keep:
-                    dataset = dataset.remove_columns(col)
+            # for col in dataset.column_names:
+            #     if col not in cols_keep:
+            #         dataset = dataset.remove_columns(col)
             
             if os.getlogin() == "darke":
                 a = pd.DataFrame(dataset)
-                c = a[a["labels"] == 0 ][:1000]
-                b = a[a["labels"] == 1 ][:1000]
+                if name == "train":
+                    c = a[a["labels"] == 0 ][:4000]
+                    b = a[a["labels"] == 1 ][:4000]
+                if name == "validation":
+                    c = a[a["labels"] == 0 ][:1000]
+                    b = a[a["labels"] == 1 ][:1000]
                 new_data = pd.concat([b, c])
                 dataset = Dataset.from_pandas(new_data)
                 dataset = dataset.remove_columns("__index_level_0__")
                 
 
             # Set the dataset format
+            # dataset.set_format(type='torch', 
+            #     columns=['input_ids', 'attention_mask', 'labels', "patent_number"])
             dataset.set_format(type='torch', 
-                columns=['input_ids', 'attention_mask', 'labels'])
+                columns=dataset.column_names)
             
             if return_data_loader:
                 data_loaders.append(DataLoader(dataset, batch_size=args.batch_size[name], shuffle=(name=='train')))
