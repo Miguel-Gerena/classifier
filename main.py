@@ -55,6 +55,9 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     total_sample = 0
     total_confusion = np.zeros((CLASSES, CLASSES))
 
+    correct_predictions = []
+    incorrect_predictions = []
+
     if use_torch_metrics:
         torch_metrics = {}
         torch_metrics["acc"] = BinaryAccuracy()
@@ -63,10 +66,12 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
         # Loop over the examples in the evaluation set
     for i, batch in enumerate(tqdm(val_loader)):
-        inputs, decisions, masks = batch['input_ids'], batch['labels'], batch['attention_mask']
-        inputs = inputs.to(device)
-        decisions = decisions.to(device)
-        masks = masks.to(device)
+        # inputs, decisions, masks = batch['input_ids'], batch['labels'], batch['attention_mask']
+        # inputs = inputs.to(device)
+        # decisions = decisions.to(device)
+        # masks = masks.to(device)
+        inputs, decisions, masks, patent_numbers = batch['input_ids'], batch['labels'], batch['attention_mask'], batch['patent_number']
+        inputs, decisions, masks = inputs.to(device), decisions.to(device), masks.to(device)
         
         with torch.no_grad():
             outputs = model(input_ids=inputs, labels=decisions, attention_mask=masks)
@@ -76,6 +81,16 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
 
         preds = torch.argmax(logits, axis=1).flatten()
         labels = decisions.flatten()
+        correct = preds == decisions
+        
+        for idx, was_correct in enumerate(correct):
+            patent_num = patent_numbers[idx]
+            if was_correct:
+                correct_predictions.append(patent_num)
+            else:
+                incorrect_predictions.append(patent_num)
+        
+        # print(f"After batch {i+1}, Correct Predictions: {len(correct_predictions)}, Incorrect Predictions: {len(incorrect_predictions)}")
 
         correct_n, sample_n, c_matrix, f1 = measure_accuracy(preds.cpu().numpy(), labels.cpu().numpy())
         total_confusion += c_matrix
@@ -95,6 +110,20 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     print(f'*** F1 on the {name} set: {total_f1}')
     print(f'*** Confusion matrix:\n{total_confusion}')
 
+    os.makedirs(args.model_path, exist_ok=True)
+    correct_predictions_path = os.path.join(args.model_path, 'correct_predictions_patent_num.json')
+    incorrect_predictions_path = os.path.join(args.model_path, 'incorrect_predictions_patent_num.json')
+
+    with open(correct_predictions_path, 'w') as f:
+        json.dump(correct_predictions, f, indent=4)
+    with open(incorrect_predictions_path, 'w') as f:
+        json.dump(incorrect_predictions, f, indent=4)
+
+    print(f"Total Correct Predictions: {len(correct_predictions)}")
+    print(f"Total Incorrect Predictions: {len(incorrect_predictions)}")
+    print("Sample Correct Predictions:", correct_predictions[:5]) 
+    print("Sample Incorrect Predictions:", incorrect_predictions[:5])
+
     if args.tensorboard:
         tensorboard_writer.add_scalar(f'val/{name}_mean_loss', mean_loss, step)
         tensorboard_writer.add_scalar(f'val/{name}_acc', acc, step)   
@@ -112,6 +141,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     
     if name=="train":
         del val_loader
+
     return mean_loss, float(acc) * 100., total_f1
 
 
