@@ -7,3 +7,4 @@ tensorboard
 *.feather
 *.pyc
 *.env
+*.png
