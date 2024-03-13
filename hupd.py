@@ -276,7 +276,7 @@ class Patents(datasets.GeneratorBasedBuilder):
             final_df = pd.DataFrame()
             for file in os.listdir(json_dir):
                 year = file.split(".")
-                if len(year) == 1 and year[0] in ["2008", "2009", "2010", "2012", "2013", "2014"]:
+                if len(year) == 1 and year[0] in [ "2012", "2013", "2014"]:
                 # if len(year) == 1 and year[0] in ["2015"]:
                 # if len(year) == 1:
                     print(year)
