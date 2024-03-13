@@ -212,14 +212,14 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
             #     if col not in cols_keep:
             #         dataset = dataset.remove_columns(col)
             
-            if os.getlogin() == "darke":
+            if os.getlogin() == "darke" and name =="validation":
                 a = pd.DataFrame(dataset)
                 if name == "train":
                     c = a[a["labels"] == 0 ][:4000]
                     b = a[a["labels"] == 1 ][:4000]
                 if name == "validation":
-                    c = a[a["labels"] == 0 ][:1000]
-                    b = a[a["labels"] == 1 ][:1000]
+                    c = a[a["labels"] == 0 ][:500]
+                    b = a[a["labels"] == 1 ][:500]
                 new_data = pd.concat([b, c])
                 dataset = Dataset.from_pandas(new_data)
                 dataset = dataset.remove_columns("__index_level_0__")

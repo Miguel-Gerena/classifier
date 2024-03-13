@@ -298,7 +298,7 @@ class Patents(datasets.GeneratorBasedBuilder):
             if self.config.val_filing_end_date:
                 df = df[df['filing_date'] <= self.config.val_filing_end_date]
             df = df.sample(frac=1.0, random_state=RANDOM_STATE)
-            num_train_samples = int(len(df) * 0.85)
+            num_train_samples = int(len(df) * 0.95)
             train_df = df.iloc[0:num_train_samples]
             val_df = df.iloc[num_train_samples:-1]
 

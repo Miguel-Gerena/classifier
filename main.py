@@ -110,19 +110,20 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     print(f'*** F1 on the {name} set: {total_f1}')
     print(f'*** Confusion matrix:\n{total_confusion}')
 
-    os.makedirs(args.model_path, exist_ok=True)
-    correct_predictions_path = os.path.join(args.model_path, 'correct_predictions_patent_num.json')
-    incorrect_predictions_path = os.path.join(args.model_path, 'incorrect_predictions_patent_num.json')
+    if(args.validation):
+        os.makedirs(args.model_path, exist_ok=True)
+        correct_predictions_path = os.path.join(args.model_path, 'correct_predictions_patent_num.json')
+        incorrect_predictions_path = os.path.join(args.model_path, 'incorrect_predictions_patent_num.json')
 
-    with open(correct_predictions_path, 'w') as f:
-        json.dump(correct_predictions, f, indent=4)
-    with open(incorrect_predictions_path, 'w') as f:
-        json.dump(incorrect_predictions, f, indent=4)
+        with open(correct_predictions_path, 'w') as f:
+            json.dump(correct_predictions, f, indent=4)
+        with open(incorrect_predictions_path, 'w') as f:
+            json.dump(incorrect_predictions, f, indent=4)
 
-    print(f"Total Correct Predictions: {len(correct_predictions)}")
-    print(f"Total Incorrect Predictions: {len(incorrect_predictions)}")
-    print("Sample Correct Predictions:", correct_predictions[:5]) 
-    print("Sample Incorrect Predictions:", incorrect_predictions[:5])
+        print(f"Total Correct Predictions: {len(correct_predictions)}")
+        print(f"Total Incorrect Predictions: {len(incorrect_predictions)}")
+        print("Sample Correct Predictions:", correct_predictions[:5]) 
+        print("Sample Incorrect Predictions:", incorrect_predictions[:5])
 
     if args.tensorboard:
         tensorboard_writer.add_scalar(f'val/{name}_mean_loss', mean_loss, step)
@@ -296,7 +297,7 @@ if __name__ == '__main__':
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
-    parser.add_argument('--accumulation_steps', default=32, help='Num steps to accum gradient')
+    parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     # parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--validation', action='store_true', help='Enable validation mode')
