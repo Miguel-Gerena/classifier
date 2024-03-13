@@ -296,7 +296,7 @@ if __name__ == '__main__':
     # parser.add_argument('--combine_abstract_claims', type=bool, default=True, help='Combine the abstract and claims and use that as the dataset')
     
     # Training
-    parser.add_argument('--accumulation_steps', default=32, help='Num steps to accum gradient')
+    parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
     # parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
     parser.add_argument('--validation', action='store_true', help='Enable validation mode')
