@@ -208,9 +208,9 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
 
             cols_keep = ['input_ids', 'attention_mask', 'labels']
 
-            for col in dataset.column_names:
-                 if col not in cols_keep:
-                     dataset = dataset.remove_columns(col)
+            # for col in dataset.column_names:
+            #     if col not in cols_keep:
+            #         dataset = dataset.remove_columns(col)
             
             if os.getlogin() == "darke" and name =="validation":
                 a = pd.DataFrame(dataset)
@@ -226,8 +226,8 @@ def create_dataset(args, dataset_dict, tokenizer, section='abstract',  return_da
                 
 
             # Set the dataset format
-            dataset.set_format(type='torch', 
-                 columns=['input_ids', 'attention_mask', 'labels'])
+            # dataset.set_format(type='torch', 
+            #     columns=['input_ids', 'attention_mask', 'labels'])
           
             
             if return_data_loader:
