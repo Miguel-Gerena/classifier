@@ -13,16 +13,11 @@ import datetime
 import json
 import pandas as pd
 
-# wandb
-try:
-    import wandb
-except ImportError:
-    wandb = None
 
 # PyTorch
 import torch
 from torch.utils import tensorboard
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 
 # Hugging Face datasets
 from datasets import load_dataset
@@ -110,19 +105,7 @@ def validation(args, val_loader, model, criterion, device, name='validation', wr
     print(f'*** F1 on the {name} set: {total_f1}')
     print(f'*** Confusion matrix:\n{total_confusion}')
 
-    os.makedirs(args.model_path, exist_ok=True)
-    correct_predictions_path = os.path.join(args.model_path, 'correct_predictions_patent_num.json')
-    incorrect_predictions_path = os.path.join(args.model_path, 'incorrect_predictions_patent_num.json')
 
-    with open(correct_predictions_path, 'w') as f:
-        json.dump(correct_predictions, f, indent=4)
-    with open(incorrect_predictions_path, 'w') as f:
-        json.dump(incorrect_predictions, f, indent=4)
-
-    print(f"Total Correct Predictions: {len(correct_predictions)}")
-    print(f"Total Incorrect Predictions: {len(incorrect_predictions)}")
-    print("Sample Correct Predictions:", correct_predictions[:5]) 
-    print("Sample Incorrect Predictions:", incorrect_predictions[:5])
 
     if args.tensorboard:
         tensorboard_writer.add_scalar(f'val/{name}_mean_loss', mean_loss, step)
@@ -202,10 +185,7 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                     scheduler.step()
             
                 total_train_loss += loss.cpu().item()
-            # wandb (optional) 
-            if args.wandb:
-                wandb.log({'Training Loss': loss})
-            
+
             if args.tensorboard:
                 tensorboard_writer.add_scalar('train/loss', loss.item(), epoch * len(data_loaders[0]) + i)
                 tensorboard_writer.add_scalar('train/mean_loss', total_train_loss / (i if i > 0 else 1), epoch * len(data_loaders[0]) + i)
@@ -220,9 +200,6 @@ def train(args, data_loaders, epoch_n, model, optim, scheduler, criterion, devic
                 # Get the performance of the model on the validation set
                 mean_loss, val_acc, f1_acc = validation(args, data_loaders[1], model, criterion, device, write_file=write_file, tensorboard_writer=tensorboard_writer, step=epoch * len(data_loaders[0]) + i)
                 model.train()
-
-                if args.wandb:
-                    wandb.log({'Validation Accuracy': val_acc})
 
                 if best_val_acc < val_acc:
                     best_val_acc = val_acc
@@ -298,14 +275,14 @@ if __name__ == '__main__':
     # Training
     parser.add_argument('--accumulation_steps', default=8, help='Num steps to accum gradient')
     parser.add_argument('--train_from_scratch', action='store_true', help='Train the model from the scratch.')
-    # parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
-    parser.add_argument('--validation', action='store_true', help='Enable validation mode')
+    parser.add_argument('--validation', default=True, help='Perform only validation/inference. (No performance evaluation on the training data necessary).')
+    # parser.add_argument('--validation', action='store_true', help='Enable validation mode')
 
     parser.add_argument('--batch_size', type=dict, default={'train':1, 'validation':1}, help='Batch size.')
     parser.add_argument('--epoch_n', type=int, default=1, help='Number of epochs (for training).')
     parser.add_argument('--val_every', type=int, default=2100, help='Number of iterations we should take to perform validation.')
     parser.add_argument('--validate_training_every', type=int, default=8500, help='Number of iterations we should take to perform training validation.')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Model learning rate.')
+    parser.add_argument('--lr', type=float, default=3e-4, help='Model learning rate.')
     parser.add_argument('--wandb', action='store_true', help='Use wandb.')
     parser.add_argument('--wandb_name', type=str, default=None, help='wandb project name.')
     parser.add_argument('--use_scheduler', default=True, help='Use a scheduler.')
@@ -330,7 +307,7 @@ if __name__ == '__main__':
     mistral_model_name = "mistralai/Mistral-7B-v0.1"
     # Model related params
     # model_path = "CS224N_models/mistralai/Mistral-7B-v0.1/claims_Mistral-7B-v0.1_2_8_0.0001_512_False_sample_False_date_3_3_hr_18/epoch_"
-    model_path = "CS224N_models/distilbert-base-uncased/claims_distilbert-base-uncased_2_8_2e-05_512_False_all_False_date_3_2_hr_21/epoch_"
+    model_path = "CS224N_models/mistralai/Mistral-7B-v0.1/claims_Mistral-7B-v0.1_1_8_0.0003_512_False_all_False_date_3_13_hr_7/"
     parser.add_argument('--model_name', type=str, default=mistral_model_name, help='Name of the model.')
     parser.add_argument('--model_path', type=str, default=model_path + "model", help='(Pre-trained) model path.')
     parser.add_argument('--tokenizer_path', type=str, default=model_path + "tokenizer", help='(Pre-trained) tokenizer path.')
@@ -370,17 +347,6 @@ if __name__ == '__main__':
         filename = f'{cat_label}_{args.section}_maxlength{args.max_length}.txt'
     args.filename = args.save_path + filename
 
-    # if args.validation:
-    #     write_file = ""
-    #     args.dataset_name = "all"
-    #     args.tensorboard = None
-    #     args.uniform_split = False
-    #     args.val_set_balancer = True
-    #     args.train_filing_start_date = '2017-01-01'
-    #     args.train_filing_end_date = '2017-01-21'
-    #     args.val_filing_start_date = '2017-01-01'
-    #     args.val_filing_end_date = '2017-01-31'
-
     if args.validation:
         write_file = ""
         args.dataset_name = "all"
@@ -393,8 +359,6 @@ if __name__ == '__main__':
         args.val_filing_end_date = '2015-2-15'
         args.uniform_split = True
         args.val_set_balancer = True
-
-
     else:
         write_file = open(args.filename, "w")
 
@@ -501,11 +465,6 @@ if __name__ == '__main__':
 
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)  
 
- 
-    if args.wandb:
-        wandb_project_name = 'PatentClassification_' + cat_label
-        wandb.init(project=wandb_project_name, name=args.wandb_name)
-    
     if write_file:
         write_file.write(f'\nModel:\n {model}\nOptimizer: {optim}\n')
     
