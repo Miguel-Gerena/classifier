@@ -1,52 +1,55 @@
-# What Was That?: Lip-Reading Silent Videos
+# Patent Acceptance Prediction With Large Language Models
 
-## Authors: Akayla Hackson, Miguel Gerena, Linyin Lyu
-**Stanford University**
+## Stanford CS224N Custom Project
+**Project proposed & mentored by Mirac Suzgun**
 
-**Contact**: [akayla@stanford.edu](mailto:akayla@stanford.edu), [miguelg2@stanford.edu](mailto:miguelg2@stanford.edu), [llyu@stanford.edu](mailto:llyu@stanford.edu)
+**Authors**: Akayla Hackson, Miguel Gerena
+
+**Affiliations**:
+- Department of Electrical Engineering, Stanford University
+- Department of Computer Science, Stanford University
+
+**Contact**: [akayla@stanford.edu](mailto:akayla@stanford.edu), [miguelg2@stanford.edu](mailto:miguelg2@stanford.edu)
 
 ---
 
 ### Abstract
-This study develops three models to advance lip-reading technology using silent video analysis, achieving different levels of success in recognizing spoken words and sentences purely from visual information.
+This paper presents a Language Model (LM) developed to predict patent approval outcomes for small businesses and inventors. Leveraging the linguistic analysis of patent application texts, our model achieved a new state-of-the-art (SOTA) accuracy of 64.37%, surpassing the previous best model's accuracy of 57.96%. Despite this achievement, our model has reached a performance plateau and requires further enhancement.
 
 ---
 
 ### Introduction
-Lip-reading, or visual speech recognition, involves transcribing text from silent videos. It has applications in diverse fields such as surveillance, silent video conferencing, and archival film transcription. The task faces challenges due to visual ambiguities among similar phonetic sounds and diverse mouth movements across speakers.
+Small businesses and inventors face significant challenges in securing patent approvals, often hindered by the complex patent application process and the need for precise technical documentation. Our LM aims to democratize the patent application process by providing predictive insights into the viability of patent applications, thereby helping to optimize their chances of approval.
 
 ---
 
 ### Model Development
-- **Speaking Detection Model**: Uses a 3D-CNN to detect speaking activity with 77.63% accuracy.
-- **Word Prediction Model (LRW)**: Extends the 3D-CNN with LSTM to handle temporal dependencies, focusing on single-word prediction with 52.19% accuracy.
-- **Sentence Prediction Model**: Combines the previous architectures with an Encoder-Decoder Transformer layer aimed at constructing full sentences, which needs further improvement due to issues with local minima.
+- **Initial Model**: Our baseline model, a fine-tuned variant of BERT, exceeded the current best model with 64.37% accuracy.
+- **Advanced Models**: We experimented with larger and more capable models such as Mistral-7b and Gemma-7b, incorporating advanced techniques like LoRA and model quantization to enhance performance further.
 
 ---
 
 ### Methodology
-Our approach combines spatiotemporal CNNs for feature extraction from video frames and Bi-LSTM for modeling temporal sequence dynamics. The models are further enhanced by transformer layers for handling longer-range dependencies and improving sentence structure prediction.
-
----
-
-### Datasets and Preprocessing
-- **LRS2 Dataset**: Used for predicting both speaking status and full sentences.
-- **LRW Dataset**: Employed for single-word predictions.
-- Videos were processed to maintain uniform frame rates and normalized for consistent input to the models.
+We employed a variety of LMs and techniques to refine our prediction model:
+- **BERT and Variants**: Used for their powerful contextual understanding capabilities.
+- **Efficiency Techniques**: Implementation of LoRA and model quantization to reduce computational demands while maintaining high performance.
 
 ---
 
 ### Experiments and Results
-Initial experiments on speaking detection provided a foundation with reasonable accuracy. The single-word prediction model showed promise but highlighted the complexity of extending to full sentences. The most advanced model, intended for full sentences, demonstrated the need for significant refinement.
+Our experiments utilized the Harvard USPTO Patent Dataset, focusing on patent acceptance prediction. Despite initial successes, further improvements are necessary to overcome the performance plateau encountered by our current best models.
 
 ---
 
-### Conclusions and Future Work
-While the models for detecting speech and predicting words performed commendably, the sentence prediction model requires further development. Future work will focus on refining the models using additional data, extended training, and potentially incorporating more advanced techniques like self-supervised learning to handle the complexities of lip reading.
+### Conclusion and Future Work
+While we have surpassed the existing SOTA models in accuracy, our journey continues as we seek to break through the current performance limitations. Future efforts will focus on exploring more sophisticated models and further refining our approaches to better handle the complexities of patent applications.
 
 ---
 
 ### Acknowledgements
-We thank our colleagues and department for their support and the insightful discussions that helped shape this research.
+We express our gratitude to our mentor Mirac Suzgun and all who supported this project.
 
 ---
+
+For more information or to contribute to this project, please contact the authors at the provided email addresses.
+
