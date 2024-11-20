@@ -1,13 +1,8 @@
 # Patent Acceptance Prediction With Large Language Models
 
-## Stanford CS224N Custom Project
-**Project proposed & mentored by Mirac Suzgun**
+## Stanford University
 
 **Authors**: Akayla Hackson, Miguel Gerena
-
-**Affiliations**:
-- Department of Electrical Engineering, Stanford University
-- Department of Computer Science, Stanford University
 
 **Contact**: [akayla@stanford.edu](mailto:akayla@stanford.edu), [miguelg2@stanford.edu](mailto:miguelg2@stanford.edu)
 
